@@ -16,7 +16,7 @@ public class QueueStatusDto {
     private String playerId;
     private boolean inQueue;
     private Integer queuePosition;
-    private Integer estimatedWaitTime;  // en segundos
+    private Integer estimatedWaitTime; 
     private Integer playersInQueue;
 }
 

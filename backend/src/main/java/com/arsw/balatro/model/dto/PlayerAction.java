@@ -21,22 +21,22 @@ public class PlayerAction {
     private String playerId;
     private String gameId;
     
-    // Para jugadas de cartas
-    private List<String> cardIds;
-    private String handType;  // "PAIR", "FLUSH", etc.
     
-    // Para compras en tienda
+    private List<String> cardIds;
+    private String handType;  
+    
+   
     private String itemId;
-    private String itemType;  // "JOKER", "PLANET", etc.
+    private String itemType; 
     private Integer itemIndex;
     
-    // Para venta de items
+    
     private Integer jokerSlot;
     
-    // Para reroll de tienda
+    
     private Boolean rerollShop;
     
-    // Metadatos
+  
     private Long timestamp;
 }
 

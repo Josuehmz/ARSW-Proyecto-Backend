@@ -23,14 +23,13 @@ public class GameState {
     private Integer currentRound;
     private Integer currentAnte;
     
-    // Estado de jugadores
+    
     private PlayerState player1;
     private PlayerState player2;
     
-    // Información de la ronda actual
+  
     private RoundInfo currentRoundInfo;
-    
-    // Ganador (null si el juego continúa)
+   
     private String winnerId;
     
     private Long lastUpdate;
