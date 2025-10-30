@@ -745,7 +745,7 @@ El diseño es **modular**, **escalable** y **fácil de extender**, perfecto para
 
 **Proyecto ARSW - Arquitecturas de Software**  
 Universidad Escuela Colombiana de Ingeniería Julio Garavito  
-2024
+
 
 **Equipo:**
 - Samuel Alejandro Prieto Reyes
