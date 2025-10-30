@@ -70,7 +70,6 @@ Cliente A                   Backend                    Cliente B
 ## 📦 Estructura del Proyecto
 
 ```
-backend/
 ├── src/main/java/com/arsw/balatro/
 │   ├── BalatroBackendApplication.java    # Clase principal
 │   │
