@@ -70,6 +70,8 @@ Cliente A                   Backend                    Cliente B
 ## 📦 Estructura del Proyecto
 
 ```
+ARSW-Proyecto-Backend/
+│
 ├── src/main/java/com/arsw/balatro/
 │   ├── BalatroBackendApplication.java    # Clase principal
 │   │
@@ -101,7 +103,10 @@ Cliente A                   Backend                    Cliente B
 ├── src/main/resources/
 │   └── application.properties             # Configuración de la app
 │
-└── pom.xml                                # Dependencias Maven
+├── pom.xml                                # Dependencias Maven
+├── target/                                # Archivos compilados (generado)
+├── LICENSE                                # Licencia MIT
+└── README.md                              # Este archivo
 ```
 
 ## 🔧 Componentes Principales
@@ -435,13 +440,12 @@ stompClient.send(`/app/game/${gameId}/action`, {}, JSON.stringify({
 1. **Clonar el repositorio y cambiar a rama develop**
 ```bash
 git clone <repo-url>
-cd ARSW-PROYECTO-BALATRO
+cd ARSW-Proyecto-Backend
 git checkout develop
 ```
 
 2. **Compilar el proyecto**
 ```bash
-cd backend
 mvn clean install
 ```
 

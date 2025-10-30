@@ -23,9 +23,9 @@ public class BalatroBackendApplication {
         System.out.println("╔════════════════════════════════════════════════════════════╗");
         System.out.println("║   🃏  Balatro Multiplayer Backend - STARTED  🃏           ║");
         System.out.println("║                                                            ║");
-        System.out.println("║   Server: http://localhost:8081                            ║");
-        System.out.println("║   WebSocket: ws://localhost:8081/ws                        ║");
-        System.out.println("║   Health: http://localhost:8081/actuator/health            ║");
+        System.out.println("║   Server: http://localhost:8080                            ║");
+        System.out.println("║   WebSocket: ws://localhost:8080/ws                        ║");
+        System.out.println("║   Health: http://localhost:8080/actuator/health            ║");
         System.out.println("║                                                            ║");
         System.out.println("║   Ready for connections! 🚀                                ║");
         System.out.println("╚════════════════════════════════════════════════════════════╝");
