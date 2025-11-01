@@ -14,7 +14,7 @@ Este backend implementa una **arquitectura de clientes gruesos** donde:
 
 ## 🏗️ Arquitectura del Sistema
 
-### Diagrama de Componentes
+### Diagrama 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
