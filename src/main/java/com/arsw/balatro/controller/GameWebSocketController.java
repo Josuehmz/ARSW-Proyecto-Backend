@@ -15,6 +15,10 @@ import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 
+/**
+ * Controlador WebSocket simplificado que actúa como intermediario de mensajes.
+ * No procesa lógica de juego, solo reenvía mensajes entre jugadores.
+ */
 @Controller
 @RequiredArgsConstructor
 @Slf4j
@@ -24,6 +28,9 @@ public class GameWebSocketController {
     private final GameService gameService;
     private final SimpMessagingTemplate messagingTemplate;
 
+    /**
+     * Unirse a la cola de matchmaking
+     */
     @MessageMapping("/matchmaking/join")
     public void joinMatchmaking(@Payload GameMessage message, Principal principal) {
         try {
@@ -51,6 +58,9 @@ public class GameWebSocketController {
         }
     }
 
+    /**
+     * Salir de la cola de matchmaking
+     */
     @MessageMapping("/matchmaking/leave")
     public void leaveMatchmaking(@Payload GameMessage message, Principal principal) {
         try {
@@ -77,70 +87,50 @@ public class GameWebSocketController {
         }
     }
 
-    @MessageMapping("/game/{gameId}/action")
-    public void handleGameAction(
-            @DestinationVariable String gameId,
-            @Payload PlayerAction action,
-            Principal principal
-    ) {
-        try {
-            String playerId = extractPlayerId(action.getPlayerId(), principal);
-            action.setPlayerId(playerId);
-            action.setGameId(gameId);
-            
-            log.info("Player {} performing action {} in game {}", 
-                playerId, action.getActionType(), gameId);
-            
-            GameState updatedState = gameService.processAction(gameId, action);
-            
-            GameMessage stateUpdate = GameMessage.create(
-                MessageType.GAME_STATE_UPDATE,
-                gameId,
-                playerId,
-                updatedState
-            );
-            
-            messagingTemplate.convertAndSend(
-                "/topic/game/" + gameId,
-                stateUpdate
-            );
-            
-        } catch (Exception e) {
-            log.error("Error processing game action: {}", e.getMessage());
-            sendError(action.getPlayerId(), gameId, "Error al procesar acción: " + e.getMessage());
-        }
-    }
-
-    @MessageMapping("/game/{gameId}/ready")
-    public void markPlayerReady(
+    /**
+     * Reenvía mensajes de juego entre jugadores sin procesarlos.
+     * El backend solo actúa como intermediario.
+     */
+    @MessageMapping("/game/{gameId}/message")
+    public void relayGameMessage(
             @DestinationVariable String gameId,
             @Payload GameMessage message,
             Principal principal
     ) {
         try {
             String playerId = extractPlayerId(message, principal);
-            log.info("Player {} ready in game {}", playerId, gameId);
+            message.setPlayerId(playerId);
+            message.setGameId(gameId);
             
-            gameService.markPlayerReady(gameId, playerId);
+            // Verificar que el jugador pertenece al juego
+            if (!gameService.isPlayerInGame(gameId, playerId)) {
+                log.warn("Player {} attempted to send message to game {} but is not a participant", 
+                    playerId, gameId);
+                sendError(playerId, gameId, "No perteneces a esta partida");
+                return;
+            }
             
-            GameMessage readyMessage = GameMessage.create(
-                MessageType.PLAYER_STATE_UPDATE,
-                gameId,
-                playerId,
-                "Player ready"
-            );
+            log.debug("Relaying message from player {} in game {}: type={}", 
+                playerId, gameId, message.getType());
             
+            // Actualizar timestamp de actividad
+            gameService.updateGameActivity(gameId);
+            
+            // Reenviar el mensaje a ambos jugadores en el topic del juego
             messagingTemplate.convertAndSend(
                 "/topic/game/" + gameId,
-                readyMessage
+                message
             );
             
         } catch (Exception e) {
-            log.error("Error marking player ready: {}", e.getMessage());
-            sendError(message.getPlayerId(), gameId, "Error al marcar listo: " + e.getMessage());
+            log.error("Error relaying game message: {}", e.getMessage());
+            sendError(message.getPlayerId(), gameId, "Error al enviar mensaje: " + e.getMessage());
         }
     }
 
+    /**
+     * Manejo de mensajes de chat
+     */
     @MessageMapping("/game/{gameId}/chat")
     @SendTo("/topic/game/{gameId}/chat")
     public GameMessage handleChatMessage(
@@ -159,6 +149,9 @@ public class GameWebSocketController {
         return message;
     }
 
+    /**
+     * Manejo de emotes
+     */
     @MessageMapping("/game/{gameId}/emote")
     @SendTo("/topic/game/{gameId}")
     public GameMessage handleEmote(
@@ -174,6 +167,9 @@ public class GameWebSocketController {
         return message;
     }
 
+    /**
+     * Ping para keep-alive
+     */
     @MessageMapping("/ping")
     public void handlePing(@Payload GameMessage message, Principal principal) {
         String playerId = extractPlayerId(message, principal);
@@ -195,16 +191,6 @@ public class GameWebSocketController {
     private String extractPlayerId(GameMessage message, Principal principal) {
         if (message != null && message.getPlayerId() != null) {
             return message.getPlayerId();
-        }
-        if (principal != null) {
-            return principal.getName();
-        }
-        throw new IllegalArgumentException("No se pudo determinar el ID del jugador");
-    }
-
-    private String extractPlayerId(String playerId, Principal principal) {
-        if (playerId != null) {
-            return playerId;
         }
         if (principal != null) {
             return principal.getName();

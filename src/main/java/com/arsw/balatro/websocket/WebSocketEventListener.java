@@ -13,6 +13,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
+/**
+ * Listener simplificado para eventos de conexión y desconexión WebSocket.
+ * Maneja limpieza básica de recursos sin lógica de juego compleja.
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -40,8 +44,10 @@ public class WebSocketEventListener {
         
         if (playerId != null) {
             try {
+                // Remover de la cola de matchmaking si estaba esperando
                 matchmakingService.removeFromQueue(playerId);
                 
+                // Notificar desconexión en partida activa
                 String gameId = gameService.getActiveGameIdForPlayer(playerId);
                 if (gameId != null) {
                     handlePlayerDisconnection(gameId, playerId);
@@ -53,9 +59,14 @@ public class WebSocketEventListener {
         }
     }
 
+    /**
+     * Maneja la desconexión de un jugador de una partida activa.
+     * Notifica al oponente y programa la limpieza del juego.
+     */
     private void handlePlayerDisconnection(String gameId, String playerId) {
         log.info("Player {} disconnected from game {}", playerId, gameId);
         
+        // Notificar al oponente sobre la desconexión
         GameMessage disconnectMessage = GameMessage.create(
             MessageType.PLAYER_DISCONNECTED,
             gameId,
@@ -68,10 +79,12 @@ public class WebSocketEventListener {
             disconnectMessage
         );
         
+        // Programar limpieza del juego después de 60 segundos
+        // Esto da tiempo para reconexión si es temporal
         try {
-            gameService.scheduleGameAbandonment(gameId, playerId, 30);
+            gameService.scheduleGameCleanup(gameId, 60);
         } catch (Exception e) {
-            log.error("Error scheduling game abandonment: {}", e.getMessage());
+            log.error("Error scheduling game cleanup: {}", e.getMessage());
         }
     }
 }

@@ -1,46 +1,32 @@
 package com.arsw.balatro.model.enums;
 
 /**
- * Tipos de mensajes WebSocket para comunicación en tiempo real
+ * Tipos de mensajes WebSocket simplificados para comunicación en tiempo real.
+ * El backend solo actúa como intermediario, por lo que la mayoría de mensajes
+ * específicos del juego se eliminan y se manejan como mensajes genéricos en el cliente.
  */
 public enum MessageType {
    
+    // Matchmaking
     JOIN_QUEUE,
     LEAVE_QUEUE,
     MATCH_FOUND,
     
-   
-    GAME_START,
-    GAME_END,
-    ROUND_START,
-    ROUND_END,
+    // Mensajes genéricos de juego (reenvío sin procesar)
+    GAME_MESSAGE,
     
-    
-    PLAY_HAND,
-    DISCARD_CARDS,
-    BUY_ITEM,
-    SELL_ITEM,
-    REROLL_SHOP,
-    
-    
-    GAME_STATE_UPDATE,
-    PLAYER_STATE_UPDATE,
-    OPPONENT_ACTION,
-    
-  
-    SHOP_UPDATE,
-    
-   
+    // Comunicación
     CHAT_MESSAGE,
     PLAYER_EMOTE,
     
-    
+    // Errores
     ERROR,
-    INVALID_ACTION,
     
-  
+    // Eventos de conexión
     PLAYER_CONNECTED,
     PLAYER_DISCONNECTED,
+    
+    // Keep-alive
     PING,
     PONG
 }
