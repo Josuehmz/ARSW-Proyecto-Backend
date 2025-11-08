@@ -6,11 +6,10 @@ import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 
-/**
- * Configuración de WebSocket para comunicación en tiempo real
- * Utiliza STOMP (Simple Text Oriented Messaging Protocol) sobre WebSocket
- */
+import java.security.Principal;
+
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
@@ -18,12 +17,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Value("${spring.websocket.servlet.allowed-origins}")
     private String[] allowedOrigins;
 
-    /**
-     * Configura el broker de mensajes
-     * - /topic: para mensajes broadcast (ej: actualizaciones de partida)
-     * - /queue: para mensajes punto a punto (ej: notificaciones personales)
-     * - /app: prefijo para mensajes destinados a @MessageMapping en controladores
-     */
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
         config.enableSimpleBroker("/topic", "/queue");
@@ -31,19 +24,27 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         config.setUserDestinationPrefix("/user");
     }
 
-    /**
-     * Registra endpoints STOMP
-     * - /ws: endpoint principal para conexión WebSocket
-     * - Soporta SockJS como fallback para navegadores sin soporte WebSocket nativo
-     */
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        // Crear el handshake handler inline
+        DefaultHandshakeHandler handshakeHandler = new DefaultHandshakeHandler() {
+            @Override
+            protected Principal determineUser(org.springframework.http.server.ServerHttpRequest request,
+                                            org.springframework.web.socket.WebSocketHandler wsHandler,
+                                            java.util.Map<String, Object> attributes) {
+                String sessionId = java.util.UUID.randomUUID().toString();
+                System.out.println("=== HANDSHAKE: Creating session " + sessionId + " ===");
+                return () -> sessionId;
+            }
+        };
+        
         registry.addEndpoint("/ws")
                 .setAllowedOrigins(allowedOrigins)
+                .setHandshakeHandler(handshakeHandler)
                 .withSockJS();
         
         registry.addEndpoint("/ws")
-                .setAllowedOrigins(allowedOrigins);
+                .setAllowedOrigins(allowedOrigins)
+                .setHandshakeHandler(handshakeHandler);
     }
 }
-

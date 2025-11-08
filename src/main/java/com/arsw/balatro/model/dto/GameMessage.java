@@ -1,27 +1,24 @@
 package com.arsw.balatro.model.dto;
 
 import com.arsw.balatro.model.enums.MessageType;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
-
-/**
- * Mensaje genérico para comunicación WebSocket
- */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class GameMessage {
     
     private MessageType type;
     private String gameId;
     private String playerId;
     private Object payload;
-    private LocalDateTime timestamp;
+    private String timestamp;
     private String message;
     
     public static GameMessage create(MessageType type, String gameId, String playerId, Object payload) {
@@ -30,7 +27,7 @@ public class GameMessage {
                 .gameId(gameId)
                 .playerId(playerId)
                 .payload(payload)
-                .timestamp(LocalDateTime.now())
+                .timestamp(java.time.Instant.now().toString())
                 .build();
     }
     
@@ -40,8 +37,7 @@ public class GameMessage {
                 .gameId(gameId)
                 .playerId(playerId)
                 .message(errorMessage)
-                .timestamp(LocalDateTime.now())
+                .timestamp(java.time.Instant.now().toString())
                 .build();
     }
 }
-

@@ -5,9 +5,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * DTO para notificar que se encontró una partida
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -20,4 +17,3 @@ public class MatchFoundDto {
     private String player2Name;
     private Long startTime;
 }
-

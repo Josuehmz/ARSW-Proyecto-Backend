@@ -9,10 +9,9 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class QueueStatusDto {
+public class CreateRoomDto {
     private String playerId;
-    private boolean inQueue;
-    private Integer queuePosition;
-    private Integer estimatedWaitTime; 
-    private Integer playersInQueue;
+    private String playerName;
+    private String roomCode;
+    private boolean isPrivate;
 }
