@@ -383,8 +383,47 @@ public class GameWebSocketController {
     }
 
     /**
+     * ⚠️ IMPORTANTE: Este método recibe mensajes de juego y hace BROADCAST
+     * Ruta principal para mensajes de juego: /app/game/{gameId}
+     */
+    @MessageMapping("/game/{gameId}")
+    @SendTo("/topic/game/{gameId}")
+    public GameMessage handleGameMessage(
+            @DestinationVariable String gameId,
+            @Payload GameMessage message,
+            Principal principal
+    ) {
+        try {
+            String playerId = extractPlayerId(message, principal);
+            message.setPlayerId(playerId);
+            message.setGameId(gameId);
+            
+            // Verificar que el jugador pertenece al juego
+            if (!gameService.isPlayerInGame(gameId, playerId)) {
+                log.warn("Player {} attempted to send message to game {} but is not a participant", 
+                    playerId, gameId);
+                return GameMessage.error(gameId, playerId, "No perteneces a esta partida");
+            }
+            
+            log.info("📨 Mensaje de juego recibido: gameId={}, playerId={}, type={}", 
+                gameId, playerId, message.getType());
+            
+            // Actualizar timestamp de actividad
+            gameService.updateGameActivity(gameId);
+            
+            // ✅ IMPORTANTE: Retornar el mensaje hace que se envíe a TODOS los suscritos
+            return message;
+            
+        } catch (Exception e) {
+            log.error("Error handling game message: {}", e.getMessage());
+            return GameMessage.error(gameId, message.getPlayerId(), "Error al enviar mensaje: " + e.getMessage());
+        }
+    }
+
+    /**
      * Reenvía mensajes de juego entre jugadores sin procesarlos.
      * El backend solo actúa como intermediario.
+     * Ruta alternativa: /app/game/{gameId}/message
      */
     @MessageMapping("/game/{gameId}/message")
     public void relayGameMessage(
@@ -424,7 +463,46 @@ public class GameWebSocketController {
     }
 
     /**
-     * Manejo de mensajes de chat
+     * ⚠️ IMPORTANTE: Este método recibe mensajes de CHAT y hace BROADCAST
+     * Ruta alternativa: /app/chat/{gameId} (para compatibilidad con frontend)
+     */
+    @MessageMapping("/chat/{gameId}")
+    public void handleChatMessageAlt(
+            @DestinationVariable String gameId,
+            @Payload GameMessage message,
+            Principal principal
+    ) {
+        try {
+            String playerId = extractPlayerId(message, principal);
+            message.setPlayerId(playerId);
+            message.setGameId(gameId);
+            message.setType(MessageType.CHAT_MESSAGE);
+            
+            log.info("💬 Chat recibido (alt): gameId={}, playerId={}, mensaje={}", 
+                gameId, playerId, message.getMessage());
+            
+            // Verificar que el jugador pertenece al juego
+            if (!gameService.isPlayerInGame(gameId, playerId)) {
+                log.warn("Player {} attempted to send chat to game {} but is not a participant", 
+                    playerId, gameId);
+                return;
+            }
+            
+            // ✅ IMPORTANTE: Broadcast a TODOS en el topic (incluye al emisor)
+            // El frontend debe filtrar duplicados si los añade localmente
+            messagingTemplate.convertAndSend(
+                "/topic/game/" + gameId + "/chat",
+                message
+            );
+            
+        } catch (Exception e) {
+            log.error("Error handling chat message: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * ⚠️ IMPORTANTE: Este método recibe mensajes de CHAT y hace BROADCAST
+     * Ruta estándar: /app/game/{gameId}/chat
      */
     @MessageMapping("/game/{gameId}/chat")
     @SendTo("/topic/game/{gameId}/chat")
@@ -438,9 +516,10 @@ public class GameWebSocketController {
         message.setGameId(gameId);
         message.setType(MessageType.CHAT_MESSAGE);
         
-        log.info("Chat message in game {} from player {}: {}", 
+        log.info("💬 Chat recibido: gameId={}, playerId={}, mensaje={}", 
             gameId, playerId, message.getMessage());
         
+        // ✅ IMPORTANTE: Retornar el mensaje hace BROADCAST a todos
         return message;
     }
 

@@ -4,6 +4,7 @@ import com.arsw.balatro.model.dto.GameMessage;
 import com.arsw.balatro.model.enums.MessageType;
 import com.arsw.balatro.service.GameService;
 import com.arsw.balatro.service.MatchmakingService;
+import com.arsw.balatro.service.SessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -24,6 +25,7 @@ public class WebSocketEventListener {
 
     private final MatchmakingService matchmakingService;
     private final GameService gameService;
+    private final SessionService sessionService;
     private final SimpMessagingTemplate messagingTemplate;
 
     @EventListener
@@ -38,14 +40,25 @@ public class WebSocketEventListener {
     public void handleWebSocketDisconnectListener(SessionDisconnectEvent event) {
         StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
         String sessionId = headerAccessor.getSessionId();
-        String playerId = (String) headerAccessor.getSessionAttributes().get("playerId");
         
-        log.info("WebSocket connection closed. Session ID: {}, Player ID: {}", sessionId, playerId);
+        // El sessionId aquí es diferente, necesitamos el principal
+        String principalName = headerAccessor.getUser() != null ? headerAccessor.getUser().getName() : null;
+        String playerId = null;
+        
+        if (principalName != null) {
+            playerId = sessionService.getPlayerId(principalName);
+        }
+        
+        log.info("WebSocket connection closed. Session ID: {}, Principal: {}, Player ID: {}", 
+            sessionId, principalName, playerId);
         
         if (playerId != null) {
             try {
                 // Remover de la cola de matchmaking si estaba esperando
                 matchmakingService.removeFromQueue(playerId);
+                
+                // Limpiar sesión
+                sessionService.removeByPlayerId(playerId);
                 
                 // Notificar desconexión en partida activa
                 String gameId = gameService.getActiveGameIdForPlayer(playerId);
@@ -56,6 +69,9 @@ public class WebSocketEventListener {
             } catch (Exception e) {
                 log.error("Error handling player disconnection: {}", e.getMessage());
             }
+        } else if (principalName != null) {
+            // Limpiar por sessionId si no hay playerId
+            sessionService.removeBySessionId(principalName);
         }
     }
 
