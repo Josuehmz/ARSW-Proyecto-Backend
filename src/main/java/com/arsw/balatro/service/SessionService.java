@@ -56,4 +56,16 @@ public class SessionService {
     public int getActiveSessionCount() {
         return playerToSession.size();
     }
+    
+    /**
+     * Obtiene información de debugging sobre las sesiones activas
+     */
+    public String getDebugInfo() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Active sessions: ").append(playerToSession.size()).append("\n");
+        playerToSession.forEach((playerId, sessionId) -> {
+            sb.append("  Player: ").append(playerId).append(" -> Session: ").append(sessionId).append("\n");
+        });
+        return sb.toString();
+    }
 }

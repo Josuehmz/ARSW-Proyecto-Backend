@@ -383,6 +383,78 @@ public class GameWebSocketController {
     }
 
     /**
+     * Registrar sesión del jugador (endpoint genérico usado por el frontend)
+     * Endpoint: /app/session/register
+     * El frontend envía este mensaje para registrar la sesión cuando se conecta
+     */
+    @MessageMapping("/session/register")
+    public void registerSession(@Payload GameMessage message, Principal principal) {
+        try {
+            String playerId = extractPlayerId(message, principal);
+            String sessionId = principal != null ? principal.getName() : null;
+            
+            log.info("=== REGISTER SESSION ===");
+            log.info("Player ID: {}", playerId);
+            log.info("Session ID: {}", sessionId);
+            
+            if (sessionId == null) {
+                log.error("No session ID available for player {}", playerId);
+                return;
+            }
+            
+            // Registrar la sesión (actualiza si ya existe)
+            sessionService.registerSession(playerId, sessionId);
+            log.info("✅ Session registered for player {} (session: {})", 
+                playerId, sessionId);
+            
+        } catch (Exception e) {
+            log.error("Error registering session: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Registrar sesión cuando el jugador entra a una partida
+     * Endpoint: /app/game/{gameId}/register
+     * Esto asegura que la sesión esté registrada para el enrutamiento de WebRTC
+     */
+    @MessageMapping("/game/{gameId}/register")
+    public void registerGameSession(
+            @DestinationVariable String gameId,
+            @Payload GameMessage message,
+            Principal principal
+    ) {
+        try {
+            String playerId = extractPlayerId(message, principal);
+            String sessionId = principal != null ? principal.getName() : null;
+            
+            log.info("=== REGISTER GAME SESSION ===");
+            log.info("Game ID: {}", gameId);
+            log.info("Player ID: {}", playerId);
+            log.info("Session ID: {}", sessionId);
+            
+            if (sessionId == null) {
+                log.error("No session ID available for player {}", playerId);
+                return;
+            }
+            
+            // Verificar que el jugador pertenece al juego
+            if (!gameService.isPlayerInGame(gameId, playerId)) {
+                log.warn("Player {} attempted to register for game {} but is not a participant", 
+                    playerId, gameId);
+                return;
+            }
+            
+            // Registrar la sesión (actualiza si ya existe)
+            sessionService.registerSession(playerId, sessionId);
+            log.info("✅ Session registered for player {} in game {} (session: {})", 
+                playerId, gameId, sessionId);
+            
+        } catch (Exception e) {
+            log.error("Error registering game session: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
      * ⚠️ IMPORTANTE: Este método recibe mensajes de juego y hace BROADCAST
      * Ruta principal para mensajes de juego: /app/game/{gameId}
      */
@@ -395,6 +467,13 @@ public class GameWebSocketController {
     ) {
         try {
             String playerId = extractPlayerId(message, principal);
+            String sessionId = principal != null ? principal.getName() : null;
+            
+            // Registrar/actualizar sesión cuando se envía un mensaje de juego
+            if (sessionId != null) {
+                sessionService.registerSession(playerId, sessionId);
+            }
+            
             message.setPlayerId(playerId);
             message.setGameId(gameId);
             
