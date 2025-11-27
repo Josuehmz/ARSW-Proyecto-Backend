@@ -68,6 +68,56 @@ public class WebRTCSignalingController {
                 // Verificar si es un SDP (offer/answer) o ICE candidate
                 if (message.getType().equals("OFFER") || message.getType().equals("ANSWER")) {
                     log.info("🎯 SDP {} recibido, verificando estructura...", message.getType());
+                    
+                    // Verificar que el payload contenga SDP
+                    if (message.getPayload() instanceof java.util.Map) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> payloadMap = (java.util.Map<String, Object>) message.getPayload();
+                        Object sdpObj = payloadMap.get("sdp");
+                        Object typeObj = payloadMap.get("type");
+                        
+                        if (sdpObj instanceof String) {
+                            String sdp = (String) sdpObj;
+                            boolean hasAudio = sdp.contains("m=audio");
+                            boolean hasOpus = sdp.contains("opus");
+                            boolean hasPCMU = sdp.contains("PCMU");
+                            boolean hasPCMA = sdp.contains("PCMA");
+                            
+                            log.info("🎯 Análisis del SDP {}:", message.getType());
+                            log.info("   - Tiene audio (m=audio): {}", hasAudio);
+                            log.info("   - Tiene codec Opus: {}", hasOpus);
+                            log.info("   - Tiene codec PCMU: {}", hasPCMU);
+                            log.info("   - Tiene codec PCMA: {}", hasPCMA);
+                            log.info("   - Longitud del SDP: {} caracteres", sdp.length());
+                            
+                            if (!hasAudio) {
+                                log.error("❌ PROBLEMA: El SDP no contiene línea de audio (m=audio)!");
+                                log.error("❌ Esto significa que el stream local no tiene tracks de audio configurados");
+                            } else if (!hasOpus && !hasPCMU && !hasPCMA) {
+                                log.warn("⚠️ ADVERTENCIA: El SDP tiene audio pero no tiene codecs comunes (Opus/PCMU/PCMA)");
+                            } else {
+                                log.info("✅ El SDP parece correcto con audio y codecs");
+                            }
+                            
+                            // Contar líneas de audio en el SDP
+                            String[] lines = sdp.split("\r?\n");
+                            long audioLines = java.util.Arrays.stream(lines)
+                                .filter(line -> 
+                                    line.contains("m=audio") || 
+                                    line.contains("a=rtpmap") || 
+                                    line.contains("a=sendrecv") || 
+                                    line.contains("a=sendonly") ||
+                                    line.contains("a=recvonly")
+                                )
+                                .count();
+                            log.info("   - Líneas relacionadas con audio: {}", audioLines);
+                        } else {
+                            log.warn("⚠️ El payload del SDP no tiene formato esperado (sdp no es String)");
+                        }
+                    } else {
+                        log.warn("⚠️ El payload del SDP no es un Map, tipo: {}", 
+                            message.getPayload() != null ? message.getPayload().getClass().getName() : "null");
+                    }
                 } else if (message.getType().equals("ICE_CANDIDATE")) {
                     log.debug("🧊 ICE Candidate recibido");
                 }
