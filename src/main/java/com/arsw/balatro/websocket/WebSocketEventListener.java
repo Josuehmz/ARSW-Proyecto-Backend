@@ -41,24 +41,26 @@ public class WebSocketEventListener {
         StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
         String sessionId = headerAccessor.getSessionId();
         
-        // El sessionId aquí es diferente, necesitamos el principal
-        String principalName = headerAccessor.getUser() != null ? headerAccessor.getUser().getName() : null;
-        String playerId = null;
+        // Obtener el playerId desde el registro de sesiones usando el sessionId
+        // SessionService.getPlayerId() devuelve el playerId normalizado almacenado
+        String playerId = sessionId != null ? sessionService.getPlayerId(sessionId) : null;
         
-        if (principalName != null) {
-            playerId = sessionService.getPlayerId(principalName);
-        }
+        // También obtener el principalName para logging (username de Cognito)
+        String principalName = headerAccessor.getUser() != null ? headerAccessor.getUser().getName() : null;
         
         log.info("WebSocket connection closed. Session ID: {}, Principal: {}, Player ID: {}", 
             sessionId, principalName, playerId);
         
+        // Limpiar la sesión del registro (esto elimina ambas direcciones del mapa)
+        if (sessionId != null) {
+            sessionService.removeBySessionId(sessionId);
+        }
+        
+        // Si tenemos el playerId (normalizado), hacer limpieza adicional
         if (playerId != null) {
             try {
                 // Remover de la cola de matchmaking si estaba esperando
                 matchmakingService.removeFromQueue(playerId);
-                
-                // Limpiar sesión
-                sessionService.removeByPlayerId(playerId);
                 
                 // Notificar desconexión en partida activa
                 String gameId = gameService.getActiveGameIdForPlayer(playerId);
@@ -67,11 +69,16 @@ public class WebSocketEventListener {
                 }
                 
             } catch (Exception e) {
-                log.error("Error handling player disconnection: {}", e.getMessage());
+                log.error("Error handling player disconnection: {}", e.getMessage(), e);
             }
         } else if (principalName != null) {
-            // Limpiar por sessionId si no hay playerId
-            sessionService.removeBySessionId(principalName);
+            // Si no encontramos playerId por sessionId, intentar limpiar usando el principalName
+            // (esto puede pasar si la sesión no estaba registrada correctamente)
+            log.warn("No playerId found for sessionId {}, attempting cleanup with principalName: {}", 
+                sessionId, principalName);
+            // SessionService.removeByPlayerId() normaliza automáticamente
+            sessionService.removeByPlayerId(principalName);
+            matchmakingService.removeFromQueue(principalName);
         }
     }
 

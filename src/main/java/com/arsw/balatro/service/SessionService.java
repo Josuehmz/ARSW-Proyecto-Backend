@@ -15,18 +15,38 @@ public class SessionService {
     private final Map<String, String> playerToSession = new ConcurrentHashMap<>();
     private final Map<String, String> sessionToPlayer = new ConcurrentHashMap<>();
     
+    /**
+     * Normaliza un playerId: trim + lowercase
+     * Esto permite que el enrutamiento funcione incluso si hay diferencias de mayúsculas/minúsculas o espacios
+     */
+    private String normalizePlayerId(String playerId) {
+        if (playerId == null) {
+            return null;
+        }
+        return playerId.trim().toLowerCase();
+    }
+    
     public void registerSession(String playerId, String sessionId) {
-        log.info("Registering session for player {}: {}", playerId, sessionId);
-        String oldSessionId = playerToSession.get(playerId);
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        if (normalizedPlayerId == null) {
+            log.error("Cannot register session: playerId is null");
+            return;
+        }
+        log.info("Registering session for player {} (normalized: {}): {}", playerId, normalizedPlayerId, sessionId);
+        String oldSessionId = playerToSession.get(normalizedPlayerId);
         if (oldSessionId != null) {
             sessionToPlayer.remove(oldSessionId);
         }
-        playerToSession.put(playerId, sessionId);
-        sessionToPlayer.put(sessionId, playerId);
+        playerToSession.put(normalizedPlayerId, sessionId);
+        sessionToPlayer.put(sessionId, normalizedPlayerId);
     }
     
     public String getSessionId(String playerId) {
-        return playerToSession.get(playerId);
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        if (normalizedPlayerId == null) {
+            return null;
+        }
+        return playerToSession.get(normalizedPlayerId);
     }
     
     public String getPlayerId(String sessionId) {
@@ -34,8 +54,13 @@ public class SessionService {
     }
     
     public void removeByPlayerId(String playerId) {
-        log.info("Removing session for player: {}", playerId);
-        String sessionId = playerToSession.remove(playerId);
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        if (normalizedPlayerId == null) {
+            log.warn("Cannot remove session: playerId is null");
+            return;
+        }
+        log.info("Removing session for player: {} (normalized: {})", playerId, normalizedPlayerId);
+        String sessionId = playerToSession.remove(normalizedPlayerId);
         if (sessionId != null) {
             sessionToPlayer.remove(sessionId);
         }
@@ -50,7 +75,11 @@ public class SessionService {
     }
     
     public boolean hasSession(String playerId) {
-        return playerToSession.containsKey(playerId);
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        if (normalizedPlayerId == null) {
+            return false;
+        }
+        return playerToSession.containsKey(normalizedPlayerId);
     }
     
     public int getActiveSessionCount() {

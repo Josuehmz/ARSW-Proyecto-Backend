@@ -12,10 +12,12 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
+import java.util.Map;
 
 /**
  * Controlador WebSocket simplificado que actúa como intermediario de mensajes.
@@ -36,21 +38,40 @@ public class GameWebSocketController {
      * Unirse a la cola de matchmaking
      */
     @MessageMapping("/matchmaking/join")
-    public void joinMatchmaking(@Payload GameMessage message, Principal principal) {
+    public void joinMatchmaking(
+            @Payload GameMessage message, 
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor) {
         try {
-            String playerId = extractPlayerId(message, principal);
-            String sessionId = principal != null ? principal.getName() : null;
-            
             log.info("=== MATCHMAKING JOIN REQUEST ===");
-            log.info("Player ID: {}", playerId);
-            log.info("Session ID: {}", sessionId);
+            log.info("Principal: {} (null? {})", principal != null ? principal.getName() : "null", principal == null);
+            log.info("Message: {}", message != null ? message.toString() : "null");
+            log.info("HeaderAccessor: {}", headerAccessor != null ? "not null" : "null");
+            
+            if (principal == null) {
+                log.error("❌ Principal es null! El mensaje no puede ser procesado sin autenticación.");
+                if (message != null && message.getPlayerId() != null) {
+                    GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), "Error de autenticación: Principal es null");
+                    // Intentar enviar error usando el playerId del mensaje como fallback
+                    messagingTemplate.convertAndSend("/queue/errors", errorMsg);
+                }
+                return;
+            }
+            
+            String playerId = extractPlayerId(message, principal);
+            // Obtener el sessionId real de Spring WebSocket
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
+            
+            log.info("Player ID: {} (from Principal)", playerId);
+            log.info("Session ID: {} (from Spring WebSocket)", sessionId);
             
             // Registrar la sesión
-            if (sessionId != null) {
+            if (sessionId != null && playerId != null) {
+                // SessionService normaliza automáticamente el playerId (trim + lowercase)
                 sessionService.registerSession(playerId, sessionId);
-                log.info("Session registered for player {}", playerId);
+                log.info("Session registered for player {} (normalized) -> session: {}", playerId, sessionId);
             } else {
-                log.error("No session ID available for player {}", playerId);
+                log.error("No session ID or player ID available. sessionId: {}, playerId: {}", sessionId, playerId);
                 sendError(playerId, null, "Error de sesión");
                 return;
             }
@@ -68,20 +89,22 @@ public class GameWebSocketController {
                 queueStatus
             );
             
+            // IMPORTANTE: convertAndSendToUser espera el username (Principal.getName()), no el sessionId
             messagingTemplate.convertAndSendToUser(
-                sessionId, 
+                playerId,  // Usar el username (Principal name), no el sessionId
                 "/queue/matchmaking", 
                 response
             );
             
-            log.info("Join confirmation sent to session {}", sessionId);
+            log.info("Join confirmation sent to player {} (username, sessionId: {})", playerId, sessionId);
             
         } catch (Exception e) {
             log.error("Error joining matchmaking: {}", e.getMessage(), e);
-            String sessionId = principal != null ? principal.getName() : null;
-            if (sessionId != null) {
-                GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), "Error al unirse a la cola: " + e.getMessage());
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+            String playerId = extractPlayerId(message, principal);
+            if (playerId != null) {
+                GameMessage errorMsg = GameMessage.error(null, playerId, "Error al unirse a la cola: " + e.getMessage());
+                // IMPORTANTE: convertAndSendToUser espera el username (Principal.getName()), no el sessionId
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
             }
         }
     }
@@ -119,28 +142,39 @@ public class GameWebSocketController {
      * Crear una sala privada
      */
     @MessageMapping("/room/create")
-    public void createRoom(@Payload GameMessage message, Principal principal) {
+    public void createRoom(
+            @Payload GameMessage message, 
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor) {
         try {
             String playerId = extractPlayerId(message, principal);
-            String sessionId = principal != null ? principal.getName() : null;
+            // Obtener el sessionId real de Spring WebSocket
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
             
             log.info("=== CREATE ROOM REQUEST ===");
-            log.info("Player ID: {}", playerId);
-            log.info("Session ID: {}", sessionId);
+            log.info("Player ID: {} (from Principal)", playerId);
+            log.info("Session ID: {} (from Spring WebSocket)", sessionId);
             log.info("Message payload: {}", message.getPayload());
             
-            // Validar sesión
-            if (sessionId == null) {
-                log.error("No session ID available for player {}", playerId);
-                GameMessage errorMsg = GameMessage.error(null, playerId, "Error de sesión");
-                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
+            // Validar que el Principal esté disponible
+            if (principal == null) {
+                log.error("❌ Principal es null. El mensaje requiere autenticación con Cognito.");
+                if (message != null && message.getPlayerId() != null) {
+                    GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), "Error de autenticación: Principal es null");
+                    messagingTemplate.convertAndSend("/queue/errors", errorMsg);
+                }
                 return;
             }
             
             // Registrar la sesión si no existe
-            if (!sessionService.hasSession(playerId)) {
+            if (sessionId != null && playerId != null) {
                 sessionService.registerSession(playerId, sessionId);
-                log.info("Session registered for player {}", playerId);
+                log.info("Session registered for player {} (normalized) -> session: {}", playerId, sessionId);
+            } else {
+                log.error("No session ID or player ID available. sessionId: {}, playerId: {}", sessionId, playerId);
+                GameMessage errorMsg = GameMessage.error(null, playerId, "Error de sesión");
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
+                return;
             }
             
             // Extraer datos del payload
@@ -166,7 +200,7 @@ public class GameWebSocketController {
             if (roomCode == null || roomCode.trim().isEmpty()) {
                 log.error("Room code is missing or empty");
                 GameMessage errorMsg = GameMessage.error(null, playerId, "El código de sala es requerido");
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
                 return;
             }
             
@@ -189,27 +223,32 @@ public class GameWebSocketController {
                 roomInfo
             );
             
+            // Normalizar playerId para convertAndSendToUser
+            String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+            
+            // IMPORTANTE: convertAndSendToUser espera el username (Principal.getName()), no el sessionId
             messagingTemplate.convertAndSendToUser(
-                sessionId,
+                normalizedPlayerId,  // Usar el username de Cognito normalizado
                 "/queue/room",
                 response
             );
             
-            log.info("CREATE_ROOM response sent to session {} for room {}", sessionId, roomInfo.getRoomCode());
+            log.info("✅ CREATE_ROOM response sent to player {} (normalized: {}, sessionId: {}) for room {}", 
+                playerId, normalizedPlayerId, sessionId, roomInfo.getRoomCode());
             
         } catch (IllegalStateException e) {
             log.error("Room creation failed: {}", e.getMessage());
-            String sessionId = principal != null ? principal.getName() : null;
-            if (sessionId != null) {
-                GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), e.getMessage());
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+            String playerId = extractPlayerId(message, principal);
+            if (playerId != null) {
+                GameMessage errorMsg = GameMessage.error(null, playerId, e.getMessage());
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
             }
         } catch (Exception e) {
             log.error("Error creating room: {}", e.getMessage(), e);
-            String sessionId = principal != null ? principal.getName() : null;
-            if (sessionId != null) {
-                GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), "Error al crear sala: " + e.getMessage());
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+            String playerId = extractPlayerId(message, principal);
+            if (playerId != null) {
+                GameMessage errorMsg = GameMessage.error(null, playerId, "Error al crear sala: " + e.getMessage());
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
             }
         }
     }
@@ -218,28 +257,39 @@ public class GameWebSocketController {
      * Unirse a una sala privada con código
      */
     @MessageMapping("/room/join")
-    public void joinRoom(@Payload GameMessage message, Principal principal) {
+    public void joinRoom(
+            @Payload GameMessage message, 
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor) {
         try {
             String playerId = extractPlayerId(message, principal);
-            String sessionId = principal != null ? principal.getName() : null;
+            // Obtener el sessionId real de Spring WebSocket
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
             
             log.info("=== JOIN ROOM REQUEST ===");
-            log.info("Player ID: {}", playerId);
-            log.info("Session ID: {}", sessionId);
+            log.info("Player ID: {} (from Principal)", playerId);
+            log.info("Session ID: {} (from Spring WebSocket)", sessionId);
             log.info("Message payload: {}", message.getPayload());
             
-            // Validar sesión
-            if (sessionId == null) {
-                log.error("No session ID available for player {}", playerId);
-                GameMessage errorMsg = GameMessage.error(null, playerId, "Error de sesión");
-                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
+            // Validar que el Principal esté disponible
+            if (principal == null) {
+                log.error("❌ Principal es null. El mensaje requiere autenticación con Cognito.");
+                if (message != null && message.getPlayerId() != null) {
+                    GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), "Error de autenticación: Principal es null");
+                    messagingTemplate.convertAndSend("/queue/errors", errorMsg);
+                }
                 return;
             }
             
             // Registrar la sesión si no existe
-            if (!sessionService.hasSession(playerId)) {
+            if (sessionId != null && playerId != null) {
                 sessionService.registerSession(playerId, sessionId);
-                log.info("Session registered for player {}", playerId);
+                log.info("Session registered for player {} (normalized) -> session: {}", playerId, sessionId);
+            } else {
+                log.error("No session ID or player ID available. sessionId: {}, playerId: {}", sessionId, playerId);
+                GameMessage errorMsg = GameMessage.error(null, playerId, "Error de sesión");
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
+                return;
             }
             
             // Extraer roomCode del payload
@@ -265,7 +315,7 @@ public class GameWebSocketController {
             if (roomCode == null || roomCode.trim().isEmpty()) {
                 log.error("Room code is missing or empty");
                 GameMessage errorMsg = GameMessage.error(null, playerId, "Debes proporcionar un código de sala");
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
                 return;
             }
             
@@ -276,6 +326,7 @@ public class GameWebSocketController {
                 .build();
             
             log.info("Attempting to join room with DTO: {}", joinDto);
+            log.info("💡 Debug info before join: {}", roomService.getDebugInfo());
             
             // El roomService.joinRoom crea el juego automáticamente
             RoomInfoDto roomInfo = roomService.joinRoom(joinDto);
@@ -283,12 +334,18 @@ public class GameWebSocketController {
             log.info("Player {} successfully joined room {}. Game {} created.", 
                 playerId, roomCode, roomInfo.getGameId());
             log.info("Room info: {}", roomInfo);
+            log.info("💡 RoomInfoDto playerIds - hostId: {}, guestId: {}", 
+                roomInfo.getHostId(), roomInfo.getGuestId());
+            log.info("💡 Estos playerIds están normalizados y deben usarse para WebRTC");
             
-            // Obtener sessionIds de ambos jugadores
-            String guestSession = sessionService.getSessionId(playerId);
-            String hostSession = sessionService.getSessionId(roomInfo.getHostId());
+            // Verificar que las sesiones estén registradas
+            String guestSessionId = sessionService.getSessionId(playerId);
+            String hostSessionId = sessionService.getSessionId(roomInfo.getHostId());
             
-            log.info("Guest session: {}, Host session: {}", guestSession, hostSession);
+            log.info("Guest session: {} (playerId: {}), Host session: {} (playerId: {})", 
+                guestSessionId, playerId, hostSessionId, roomInfo.getHostId());
+            log.info("💡 Para WebRTC, el frontend debe usar hostId={} y guestId={} del RoomInfoDto", 
+                roomInfo.getHostId(), roomInfo.getGuestId());
             
             // Crear mensaje de respuesta con JOIN_ROOM (lo que espera el frontend)
             GameMessage response = GameMessage.create(
@@ -298,54 +355,63 @@ public class GameWebSocketController {
                 roomInfo
             );
             
+            // Normalizar playerIds para convertAndSendToUser
+            String normalizedGuestId = playerId != null ? playerId.trim().toLowerCase() : null;
+            String normalizedHostId = roomInfo.getHostId() != null ? roomInfo.getHostId().trim().toLowerCase() : null;
+            
             // Notificar al guest que se unió exitosamente
             response.setPlayerId(playerId);
-            if (guestSession != null) {
+            if (normalizedGuestId != null && guestSessionId != null) {
+                // IMPORTANTE: convertAndSendToUser espera el username (Principal.getName()), no el sessionId
                 messagingTemplate.convertAndSendToUser(
-                    guestSession,
+                    normalizedGuestId,  // Usar el username de Cognito normalizado
                     "/queue/room",
                     response
                 );
-                log.info("JOIN_ROOM sent to guest session: {}", guestSession);
+                log.info("✅ JOIN_ROOM sent to guest: {} (normalized: {}, sessionId: {})", 
+                    playerId, normalizedGuestId, guestSessionId);
             } else {
-                log.error("No session found for guest: {}", playerId);
+                log.error("❌ No session found for guest: {} (normalized: {})", playerId, normalizedGuestId);
             }
             
             // Notificar al host que alguien se unió (CRÍTICO: el host debe saber que ya hay match)
             response.setPlayerId(roomInfo.getHostId());
-            if (hostSession != null) {
+            if (normalizedHostId != null && hostSessionId != null) {
+                // IMPORTANTE: convertAndSendToUser espera el username (Principal.getName()), no el sessionId
                 messagingTemplate.convertAndSendToUser(
-                    hostSession,
+                    normalizedHostId,  // Usar el username de Cognito normalizado
                     "/queue/room",
                     response
                 );
-                log.info("JOIN_ROOM sent to host session: {}", hostSession);
+                log.info("✅ JOIN_ROOM sent to host: {} (normalized: {}, sessionId: {})", 
+                    roomInfo.getHostId(), normalizedHostId, hostSessionId);
             } else {
-                log.error("No session found for host: {}", roomInfo.getHostId());
+                log.error("❌ No session found for host: {} (normalized: {})", 
+                    roomInfo.getHostId(), normalizedHostId);
             }
             
             log.info("=== JOIN ROOM COMPLETED ===");
             
         } catch (IllegalArgumentException e) {
             log.error("Failed to join room (validation error): {}", e.getMessage());
-            String sessionId = principal != null ? principal.getName() : null;
-            if (sessionId != null) {
-                GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), e.getMessage());
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+            String playerId = extractPlayerId(message, principal);
+            if (playerId != null) {
+                GameMessage errorMsg = GameMessage.error(null, playerId, e.getMessage());
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
             }
         } catch (IllegalStateException e) {
             log.error("Failed to join room (state error): {}", e.getMessage());
-            String sessionId = principal != null ? principal.getName() : null;
-            if (sessionId != null) {
-                GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), e.getMessage());
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+            String playerId = extractPlayerId(message, principal);
+            if (playerId != null) {
+                GameMessage errorMsg = GameMessage.error(null, playerId, e.getMessage());
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
             }
         } catch (Exception e) {
             log.error("Error joining room: {}", e.getMessage(), e);
-            String sessionId = principal != null ? principal.getName() : null;
-            if (sessionId != null) {
-                GameMessage errorMsg = GameMessage.error(null, message.getPlayerId(), "Error al unirse a la sala: " + e.getMessage());
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/errors", errorMsg);
+            String playerId = extractPlayerId(message, principal);
+            if (playerId != null) {
+                GameMessage errorMsg = GameMessage.error(null, playerId, "Error al unirse a la sala: " + e.getMessage());
+                messagingTemplate.convertAndSendToUser(playerId, "/queue/errors", errorMsg);
             }
         }
     }
@@ -386,25 +452,57 @@ public class GameWebSocketController {
      * Registrar sesión del jugador (endpoint genérico usado por el frontend)
      * Endpoint: /app/session/register
      * El frontend envía este mensaje para registrar la sesión cuando se conecta
+     * 
+     * Acepta tanto Map<String, String> (formato requerido) como GameMessage (para compatibilidad)
+     * Formato esperado del Map:
+     * {
+     *   "playerId": "username_cognito",
+     *   "timestamp": "2024-01-01T00:00:00.000Z"
+     * }
      */
     @MessageMapping("/session/register")
-    public void registerSession(@Payload GameMessage message, Principal principal) {
+    public void registerSession(
+            @Payload Map<String, String> registration, 
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor) {
         try {
-            String playerId = extractPlayerId(message, principal);
-            String sessionId = principal != null ? principal.getName() : null;
+            // Obtener el sessionId real de Spring WebSocket
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
+            
+            // Obtener el playerId del Principal (username de Cognito)
+            // El playerId del mensaje se ignora para mantener consistencia con la autenticación
+            String playerId = principal != null ? principal.getName() : null;
+            
+            // Si el mensaje trae un playerId diferente, loguear advertencia
+            if (registration != null && registration.containsKey("playerId")) {
+                String messagePlayerId = registration.get("playerId");
+                if (playerId != null && !messagePlayerId.equals(playerId)) {
+                    log.warn("⚠️ Session register: Message contains different playerId ({}), but using Cognito username ({}) instead", 
+                        messagePlayerId, playerId);
+                }
+            }
             
             log.info("=== REGISTER SESSION ===");
-            log.info("Player ID: {}", playerId);
-            log.info("Session ID: {}", sessionId);
+            log.info("Player ID: {} (from Principal)", playerId);
+            log.info("Session ID: {} (from Spring WebSocket)", sessionId);
+            if (registration != null && registration.containsKey("timestamp")) {
+                log.info("Timestamp: {}", registration.get("timestamp"));
+            }
             
             if (sessionId == null) {
                 log.error("No session ID available for player {}", playerId);
                 return;
             }
             
+            if (playerId == null) {
+                log.error("No player ID available (Principal is null)");
+                return;
+            }
+            
             // Registrar la sesión (actualiza si ya existe)
+            // SessionService normaliza automáticamente el playerId (trim + lowercase)
             sessionService.registerSession(playerId, sessionId);
-            log.info("✅ Session registered for player {} (session: {})", 
+            log.info("✅ Session registered for player {} (normalized) -> session: {}", 
                 playerId, sessionId);
             
         } catch (Exception e) {
@@ -421,16 +519,18 @@ public class GameWebSocketController {
     public void registerGameSession(
             @DestinationVariable String gameId,
             @Payload GameMessage message,
-            Principal principal
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor
     ) {
         try {
             String playerId = extractPlayerId(message, principal);
-            String sessionId = principal != null ? principal.getName() : null;
+            // Obtener el sessionId real de Spring WebSocket
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
             
             log.info("=== REGISTER GAME SESSION ===");
             log.info("Game ID: {}", gameId);
-            log.info("Player ID: {}", playerId);
-            log.info("Session ID: {}", sessionId);
+            log.info("Player ID: {} (from Principal)", playerId);
+            log.info("Session ID: {} (from Spring WebSocket)", sessionId);
             
             if (sessionId == null) {
                 log.error("No session ID available for player {}", playerId);
@@ -445,8 +545,9 @@ public class GameWebSocketController {
             }
             
             // Registrar la sesión (actualiza si ya existe)
+            // SessionService normaliza automáticamente el playerId (trim + lowercase)
             sessionService.registerSession(playerId, sessionId);
-            log.info("✅ Session registered for player {} in game {} (session: {})", 
+            log.info("✅ Session registered for player {} (normalized) in game {} -> session: {}", 
                 playerId, gameId, sessionId);
             
         } catch (Exception e) {
@@ -641,14 +742,34 @@ public class GameWebSocketController {
         );
     }
 
+    /**
+     * Extrae el playerId del usuario autenticado.
+     * Con Cognito, siempre usamos el username de Cognito como playerId para mantener consistencia.
+     * Si el mensaje trae un playerId diferente, lo ignoramos y usamos el del Principal.
+     */
     private String extractPlayerId(GameMessage message, Principal principal) {
+        // Con Cognito, siempre usar el username del Principal (viene del token JWT)
+        // Esto asegura que el playerId sea consistente con la autenticación
+        if (principal != null) {
+            String cognitoUsername = principal.getName();
+            log.debug("Using Cognito username as playerId: {}", cognitoUsername);
+            
+            // Si el mensaje trae un playerId diferente, loguear advertencia
+            if (message != null && message.getPlayerId() != null && !message.getPlayerId().equals(cognitoUsername)) {
+                log.warn("Message contains different playerId ({}), but using Cognito username ({}) instead", 
+                    message.getPlayerId(), cognitoUsername);
+            }
+            
+            return cognitoUsername;
+        }
+        
+        // Fallback: si no hay Principal (no debería pasar con Cognito), usar el del mensaje
         if (message != null && message.getPlayerId() != null) {
+            log.warn("No Principal available, using playerId from message: {}", message.getPlayerId());
             return message.getPlayerId();
         }
-        if (principal != null) {
-            return principal.getName();
-        }
-        throw new IllegalArgumentException("No se pudo determinar el ID del jugador");
+        
+        throw new IllegalArgumentException("No se pudo determinar el ID del jugador: no hay Principal ni playerId en el mensaje");
     }
 
     private void sendError(String playerId, String gameId, String errorMessage) {

@@ -6,11 +6,19 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 
+/**
+ * Controlador para manejar la señalización WebRTC del chat de voz.
+ * Usa Cognito como identificador principal (username de Cognito = playerId).
+ * 
+ * Endpoint: /app/webrtc/signal
+ * Suscripción: /user/queue/webrtc/{gameId}
+ */
 @Controller
 @RequiredArgsConstructor
 @Slf4j
@@ -20,197 +28,166 @@ public class WebRTCSignalingController {
     private final SessionService sessionService;
 
     /**
-     * Manejar mensajes de señalización WebRTC (OFFER, ANSWER, ICE_CANDIDATE)
-     * El frontend envía a: /app/webrtc/signal
+     * Maneja mensajes de señalización WebRTC (OFFER, ANSWER, ICE_CANDIDATE).
+     * 
+     * El senderId se obtiene del Principal (username de Cognito).
+     * El targetId debe venir en el mensaje (username de Cognito del destinatario).
+     * 
+     * @param message Mensaje de señalización WebRTC
+     * @param principal Principal autenticado (contiene el username de Cognito)
+     * @param headerAccessor Acceso a los headers del mensaje WebSocket
      */
     @MessageMapping("/webrtc/signal")
-    public void handleSignaling(@Payload SignalingMessage message, Principal principal) {
+    public void handleSignaling(
+            @Payload SignalingMessage message, 
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor) {
+        
+        log.info("🔔 ========== WEBRTC SIGNAL RECIBIDO ==========");
+        log.info("🔔 Principal: {} (null? {})", principal != null ? principal.getName() : "null", principal == null);
+        log.info("🔔 Message: type={}, gameId={}, targetId={}, senderId={}", 
+            message != null ? message.getType() : "null",
+            message != null ? message.getGameId() : "null",
+            message != null ? message.getTargetId() : "null",
+            message != null ? message.getSenderId() : "null");
+        log.info("🔔 HeaderAccessor: {}", headerAccessor != null ? "not null" : "null");
+        
         try {
-            String sessionId = principal != null ? principal.getName() : null;
+            // Validar que el Principal esté disponible
+            if (principal == null) {
+                log.error("❌ WebRTC Signal: Principal es null. El mensaje requiere autenticación con Cognito.");
+                return;
+            }
+
+            // Obtener el username de Cognito como senderId (identificador principal)
+            String cognitoUsername = principal.getName();
+            if (cognitoUsername == null || cognitoUsername.trim().isEmpty()) {
+                log.error("❌ WebRTC Signal: No se pudo obtener el username de Cognito del Principal.");
+                return;
+            }
+
+            // Normalizar el senderId (username de Cognito)
+            String normalizedSenderId = cognitoUsername.trim().toLowerCase();
             
+            // Normalizar el targetId (debe ser el username de Cognito del destinatario)
+            String normalizedTargetId = message.getTargetId() != null 
+                ? message.getTargetId().trim().toLowerCase() 
+                : null;
+
             // Validaciones básicas
-            if (message.getTargetId() == null || message.getTargetId().isEmpty()) {
-                log.error("❌ WebRTC Signal: targetId es null o vacío");
+            if (normalizedTargetId == null || normalizedTargetId.isEmpty()) {
+                log.error("❌ WebRTC Signal: targetId es null o vacío. Se requiere el username de Cognito del destinatario.");
                 return;
             }
-            
+
             if (message.getGameId() == null || message.getGameId().isEmpty()) {
-                log.error("❌ WebRTC Signal: gameId es null o vacío");
+                log.error("❌ WebRTC Signal: gameId es null o vacío.");
                 return;
             }
-            
+
             if (message.getType() == null || message.getType().isEmpty()) {
-                log.error("❌ WebRTC Signal: type es null o vacío");
+                log.error("❌ WebRTC Signal: type es null o vacío. Tipos válidos: OFFER, ANSWER, ICE_CANDIDATE.");
                 return;
             }
-            
-            // Asegurar que la sesión del remitente esté actualizada (maneja reconexiones)
-            if (sessionId != null && message.getSenderId() != null) {
-                sessionService.registerSession(message.getSenderId(), sessionId);
-                log.debug("✅ Sender session refreshed: player={}, session={}", message.getSenderId(), sessionId);
+
+            // Validar que no se envíe a uno mismo
+            if (normalizedSenderId.equals(normalizedTargetId)) {
+                log.error("❌ WebRTC Signal: Intento de enviar mensaje a uno mismo. senderId: {}, targetId: {}", 
+                    cognitoUsername, message.getTargetId());
+                return;
             }
-            
-            log.info("📨 WebRTC Signal received: type={}, gameId={}, from={}, to={}", 
+
+            // Advertencia si el mensaje trae un senderId diferente al de Cognito
+            if (message.getSenderId() != null && !message.getSenderId().equals(cognitoUsername)) {
+                log.warn("⚠️ WebRTC Signal: El mensaje contiene senderId diferente ({}), pero se usará el username de Cognito ({})", 
+                    message.getSenderId(), cognitoUsername);
+            }
+
+            // Actualizar el senderId en el mensaje con el username de Cognito
+            message.setSenderId(cognitoUsername);
+
+            // Registrar/actualizar la sesión del remitente
+            String springSessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
+            if (springSessionId != null && normalizedSenderId != null) {
+                sessionService.registerSession(normalizedSenderId, springSessionId);
+                log.debug("✅ Sesión del remitente actualizada: playerId={} (normalized: {}), sessionId={}", 
+                    cognitoUsername, normalizedSenderId, springSessionId);
+            } else {
+                log.warn("⚠️ No se pudo registrar la sesión del remitente: senderId={}, sessionId={}", 
+                    cognitoUsername, springSessionId);
+            }
+
+            log.info("📨 WebRTC Signal recibido: type={}, gameId={}, from={} (normalized: {}), to={} (normalized: {})", 
                 message.getType(), 
                 message.getGameId(), 
-                message.getSenderId(), 
-                message.getTargetId());
-            
-            // Log detallado del payload para debugging de audio
-            if (message.getPayload() != null) {
-                String payloadStr = message.getPayload().toString();
-                // Limitar el log para no saturar (SDP puede ser muy largo)
-                if (payloadStr.length() > 200) {
-                    payloadStr = payloadStr.substring(0, 200) + "... (truncated)";
-                }
-                log.debug("📦 Payload preview: {}", payloadStr);
-                
-                // Verificar si es un SDP (offer/answer) o ICE candidate
-                if (message.getType().equals("OFFER") || message.getType().equals("ANSWER")) {
-                    log.info("🎯 SDP {} recibido, verificando estructura...", message.getType());
-                    
-                    // Verificar que el payload contenga SDP
-                    if (message.getPayload() instanceof java.util.Map) {
-                        @SuppressWarnings("unchecked")
-                        java.util.Map<String, Object> payloadMap = (java.util.Map<String, Object>) message.getPayload();
-                        Object sdpObj = payloadMap.get("sdp");
-                        Object typeObj = payloadMap.get("type");
-                        
-                        if (sdpObj instanceof String) {
-                            String sdp = (String) sdpObj;
-                            boolean hasAudio = sdp.contains("m=audio");
-                            boolean hasOpus = sdp.contains("opus");
-                            boolean hasPCMU = sdp.contains("PCMU");
-                            boolean hasPCMA = sdp.contains("PCMA");
-                            
-                            log.info("🎯 Análisis del SDP {}:", message.getType());
-                            log.info("   - Tiene audio (m=audio): {}", hasAudio);
-                            log.info("   - Tiene codec Opus: {}", hasOpus);
-                            log.info("   - Tiene codec PCMU: {}", hasPCMU);
-                            log.info("   - Tiene codec PCMA: {}", hasPCMA);
-                            log.info("   - Longitud del SDP: {} caracteres", sdp.length());
-                            
-                            if (!hasAudio) {
-                                log.error("❌ PROBLEMA: El SDP no contiene línea de audio (m=audio)!");
-                                log.error("❌ Esto significa que el stream local no tiene tracks de audio configurados");
-                            } else if (!hasOpus && !hasPCMU && !hasPCMA) {
-                                log.warn("⚠️ ADVERTENCIA: El SDP tiene audio pero no tiene codecs comunes (Opus/PCMU/PCMA)");
-                            } else {
-                                log.info("✅ El SDP parece correcto con audio y codecs");
-                            }
-                            
-                            // Contar líneas de audio en el SDP
-                            String[] lines = sdp.split("\r?\n");
-                            long audioLines = java.util.Arrays.stream(lines)
-                                .filter(line -> 
-                                    line.contains("m=audio") || 
-                                    line.contains("a=rtpmap") || 
-                                    line.contains("a=sendrecv") || 
-                                    line.contains("a=sendonly") ||
-                                    line.contains("a=recvonly")
-                                )
-                                .count();
-                            log.info("   - Líneas relacionadas con audio: {}", audioLines);
-                        } else {
-                            log.warn("⚠️ El payload del SDP no tiene formato esperado (sdp no es String)");
-                        }
-                    } else {
-                        log.warn("⚠️ El payload del SDP no es un Map, tipo: {}", 
-                            message.getPayload() != null ? message.getPayload().getClass().getName() : "null");
-                    }
-                } else if (message.getType().equals("ICE_CANDIDATE")) {
-                    log.debug("🧊 ICE Candidate recibido");
-                }
-            } else {
-                log.warn("⚠️ Payload es null en mensaje WebRTC de tipo: {}", message.getType());
-            }
+                cognitoUsername, normalizedSenderId,
+                message.getTargetId(), normalizedTargetId);
 
-            // Obtener el sessionId del jugador destinatario con retry mechanism
-            String targetSessionId = getTargetSessionIdWithRetry(message.getTargetId(), 3, 200);
-            
+            // Verificar que la sesión del destinatario esté registrada (usar ID normalizado para buscar)
+            String targetSessionId = sessionService.getSessionId(normalizedTargetId);
             if (targetSessionId == null) {
-                log.error("❌ No session found for target player: {} after retries. Available sessions: {}", 
-                    message.getTargetId(), 
-                    sessionService.getActiveSessionCount());
+                log.error("❌ WebRTC Signal: No se encontró sesión para el destinatario: {} (normalized: {})", 
+                    message.getTargetId(), normalizedTargetId);
+                log.error("💡 El destinatario debe estar conectado y haber registrado su sesión.");
                 log.error("💡 Debug info: {}", sessionService.getDebugInfo());
-                log.error("💡 Tip: El jugador debe enviar un mensaje a /app/session/register o /app/game/{}/register antes de iniciar WebRTC", 
-                    message.getGameId());
-                log.warn("⚠️ Señal WebRTC descartada. El receptor ({}) debe registrarse primero.", message.getTargetId());
-                return;
+                log.error("💡 Sender session: {}", sessionService.getSessionId(normalizedSenderId));
+                log.error("💡 TargetId original del mensaje: {}", message.getTargetId());
+                log.error("💡 TargetId normalizado: {}", normalizedTargetId);
+                log.error("💡 SenderId (Principal): {} (normalized: {})", cognitoUsername, normalizedSenderId);
+                
+                // Intentar buscar con el targetId original también (por si acaso)
+                if (message.getTargetId() != null && !message.getTargetId().equals(normalizedTargetId)) {
+                    String altSessionId = sessionService.getSessionId(message.getTargetId());
+                    if (altSessionId != null) {
+                        log.warn("⚠️ Sesión encontrada con targetId original (sin normalizar): {}", altSessionId);
+                        log.warn("⚠️ Esto sugiere un problema de normalización. Usando sesión encontrada.");
+                        targetSessionId = altSessionId;
+                    }
+                }
+                
+                if (targetSessionId == null) {
+                    return;
+                }
             }
 
-            // Construir el mensaje a enviar (formato esperado por el frontend)
-            // El frontend espera recibir: { type: "WEBRTC_SIGNAL", payload: SignalingMessage }
-            var signalMessage = new Object() {
+            // Construir el mensaje de respuesta (formato esperado por el frontend)
+            var signalResponse = new Object() {
                 public final String type = "WEBRTC_SIGNAL";
                 public final SignalingMessage payload = message;
             };
 
-            // Destino: /user/{targetSessionId}/queue/webrtc/{gameId}
+            // Destino: /user/{cognitoUsername}/queue/webrtc/{gameId}
+            // IMPORTANTE: convertAndSendToUser espera el username del Principal.getName()
+            // Ahora el Principal.getName() devuelve el username normalizado (trim + lowercase)
+            // porque lo normalizamos en CognitoWebSocketHandshakeInterceptor
+            // Esto coincide con cómo SessionService almacena los playerIds (normalizados)
             String destination = "/queue/webrtc/" + message.getGameId();
             
-            log.info("📤 Reenviando mensaje a usuario: {} (session: {}), destino: /user{}{}", 
+            log.info("📤 Reenviando WebRTC Signal a: {} (normalized: {}, sessionId: {}), destino: /user{}{}", 
                 message.getTargetId(), 
+                normalizedTargetId,
                 targetSessionId,
-                targetSessionId,
+                normalizedTargetId,
                 destination);
-            
-            // Log del payload para debugging
-            if (log.isDebugEnabled()) {
-                log.debug("📦 Payload del mensaje: type={}, payloadType={}", 
-                    message.getType(), 
-                    message.getPayload() != null ? message.getPayload().getClass().getSimpleName() : "null");
-            }
 
-            // Enviar el mensaje al jugador destinatario en su cola personal
-            // El destinatario está escuchando en: /user/queue/webrtc/{gameId}
+            // IMPORTANTE: convertAndSendToUser usa el username del Principal
+            // El Principal.getName() ahora devuelve el username normalizado
+            // que coincide con cómo SessionService almacena los playerIds
+            // Por lo tanto, usamos normalizedTargetId que coincide con Principal.getName() del destinatario
             messagingTemplate.convertAndSendToUser(
-                targetSessionId,  // Spring busca la sesión por este ID
+                normalizedTargetId,  // Usar el username de Cognito normalizado (coincide con Principal.getName())
                 destination,
-                signalMessage  // Enviar el mensaje envuelto como espera el frontend
+                signalResponse
             );
 
-            log.info("✅ WebRTC Signal forwarded successfully: {} → {} (type: {})", 
-                message.getSenderId(), 
-                message.getTargetId(), 
+            log.info("✅ WebRTC Signal reenviado exitosamente: {} → {} (type: {})", 
+                cognitoUsername, 
+                message.getTargetId(),
                 message.getType());
 
         } catch (Exception e) {
-            log.error("❌ Error handling WebRTC signal: {}", e.getMessage(), e);
+            log.error("❌ Error al procesar WebRTC Signal: {}", e.getMessage(), e);
         }
-    }
-
-    /**
-     * Intenta obtener el sessionId del jugador destinatario con retry mechanism
-     * para manejar race conditions cuando el receptor aún no se ha registrado
-     */
-    private String getTargetSessionIdWithRetry(String targetPlayerId, int maxRetries, long delayMs) {
-        String targetSessionId = sessionService.getSessionId(targetPlayerId);
-        
-        if (targetSessionId != null) {
-            return targetSessionId;
-        }
-        
-        // Si no se encuentra, intentar con retry
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            log.debug("🔄 Retry {}: Esperando sesión del jugador {}...", attempt, targetPlayerId);
-            
-            try {
-                Thread.sleep(delayMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.warn("⚠️ Retry interrumpido mientras esperaba sesión del jugador {}", targetPlayerId);
-                break;
-            }
-            
-            targetSessionId = sessionService.getSessionId(targetPlayerId);
-            if (targetSessionId != null) {
-                log.info("✅ Sesión encontrada en retry {} para jugador {}", attempt, targetPlayerId);
-                return targetSessionId;
-            }
-        }
-        
-        return null;
     }
 }
 

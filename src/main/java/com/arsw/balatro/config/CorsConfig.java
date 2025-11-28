@@ -36,6 +36,9 @@ public class CorsConfig {
         configuration.setAllowedHeaders(List.of(allowedHeaders));
         configuration.setAllowCredentials(allowCredentials);
         configuration.setMaxAge(3600L);
+        
+        // Headers expuestos (importante para que el frontend pueda leer Authorization)
+        configuration.setExposedHeaders(Arrays.asList("Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

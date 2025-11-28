@@ -23,13 +23,30 @@ public class RoomService {
     public RoomService(GameService gameService) {
         this.gameService = gameService;
     }
+    
+    /**
+     * Normaliza un playerId: trim + lowercase
+     * Esto asegura consistencia en las comparaciones
+     */
+    private String normalizePlayerId(String playerId) {
+        if (playerId == null) {
+            return null;
+        }
+        return playerId.trim().toLowerCase();
+    }
 
     public RoomInfoDto createRoom(CreateRoomDto createDto) {
-        log.info("Creating room for player {}", createDto.getPlayerId());
+        // Normalizar playerId para consistencia
+        String normalizedPlayerId = normalizePlayerId(createDto.getPlayerId());
+        if (normalizedPlayerId == null) {
+            throw new IllegalArgumentException("PlayerId no puede ser null");
+        }
         
-        if (playerToRoom.containsKey(createDto.getPlayerId())) {
-            String existingRoomCode = playerToRoom.get(createDto.getPlayerId());
-            log.warn("Player {} already in room {}", createDto.getPlayerId(), existingRoomCode);
+        log.info("Creating room for player {} (normalized: {})", createDto.getPlayerId(), normalizedPlayerId);
+        
+        if (playerToRoom.containsKey(normalizedPlayerId)) {
+            String existingRoomCode = playerToRoom.get(normalizedPlayerId);
+            log.warn("Player {} (normalized: {}) already in room {}", createDto.getPlayerId(), normalizedPlayerId, existingRoomCode);
             throw new IllegalStateException("Ya estás en una sala. Sal primero antes de crear una nueva.");
         }
         
@@ -45,7 +62,7 @@ public class RoomService {
         
         RoomInfoDto roomInfo = RoomInfoDto.builder()
             .roomCode(roomCode)
-            .hostId(createDto.getPlayerId())
+            .hostId(normalizedPlayerId)  // Guardar el ID normalizado
             .hostName(createDto.getPlayerName())
             .isFull(false)
             .status(RoomInfoDto.RoomStatus.WAITING)
@@ -53,30 +70,49 @@ public class RoomService {
             .build();
         
         rooms.put(roomCode, roomInfo);
-        playerToRoom.put(createDto.getPlayerId(), roomCode);
+        playerToRoom.put(normalizedPlayerId, roomCode);  // Usar ID normalizado como clave
         
-        log.info("Room created with code: {}", roomCode);
+        log.info("Room created with code: {} for host: {} (normalized: {})", roomCode, createDto.getPlayerId(), normalizedPlayerId);
         
         return roomInfo;
     }
 
     public RoomInfoDto joinRoom(JoinRoomDto joinDto) {
-        String roomCode = joinDto.getRoomCode().toUpperCase();
-        log.info("Player {} attempting to join room {}", joinDto.getPlayerId(), roomCode);
+        // Normalizar playerId para consistencia
+        String normalizedPlayerId = normalizePlayerId(joinDto.getPlayerId());
+        if (normalizedPlayerId == null) {
+            throw new IllegalArgumentException("PlayerId no puede ser null");
+        }
+        
+        String roomCode = joinDto.getRoomCode() != null ? joinDto.getRoomCode().toUpperCase().trim() : null;
+        log.info("=== JOIN ROOM ATTEMPT ===");
+        log.info("Player {} (normalized: {}) attempting to join room {}", joinDto.getPlayerId(), normalizedPlayerId, roomCode);
+        log.info("Room code (original): {}", joinDto.getRoomCode());
+        log.info("Room code (normalized): {}", roomCode);
+        log.info("Total rooms available: {}", rooms.size());
+        log.info("Available room codes: {}", rooms.keySet());
+        
+        if (roomCode == null || roomCode.isEmpty()) {
+            log.error("Room code is null or empty after normalization");
+            throw new IllegalArgumentException("El código de sala es requerido");
+        }
         
         RoomInfoDto roomInfo = rooms.get(roomCode);
         if (roomInfo == null) {
-            log.warn("Room {} not found", roomCode);
+            log.error("❌ Room {} not found in rooms map", roomCode);
+            log.error("💡 Available rooms: {}", rooms.keySet());
+            log.error("💡 Total rooms: {}", rooms.size());
             throw new IllegalArgumentException("Sala no encontrada. Verifica el código.");
         }
         
-        if (playerToRoom.containsKey(joinDto.getPlayerId())) {
-            String existingRoomCode = playerToRoom.get(joinDto.getPlayerId());
+        // Usar ID normalizado para verificar si ya está en una sala
+        if (playerToRoom.containsKey(normalizedPlayerId)) {
+            String existingRoomCode = playerToRoom.get(normalizedPlayerId);
             if (existingRoomCode.equals(roomCode)) {
-                log.info("Player {} already in this room", joinDto.getPlayerId());
+                log.info("Player {} (normalized: {}) already in this room", joinDto.getPlayerId(), normalizedPlayerId);
                 return roomInfo;
             } else {
-                log.warn("Player {} already in another room {}", joinDto.getPlayerId(), existingRoomCode);
+                log.warn("Player {} (normalized: {}) already in another room {}", joinDto.getPlayerId(), normalizedPlayerId, existingRoomCode);
                 throw new IllegalStateException("Ya estás en otra sala. Sal primero.");
             }
         }
@@ -86,23 +122,24 @@ public class RoomService {
             throw new IllegalStateException("La sala está llena.");
         }
         
-        if (roomInfo.getHostId().equals(joinDto.getPlayerId())) {
-            log.warn("Host {} trying to join own room", joinDto.getPlayerId());
+        // Comparar con hostId normalizado (que también está normalizado)
+        if (roomInfo.getHostId() != null && roomInfo.getHostId().equals(normalizedPlayerId)) {
+            log.warn("Host {} (normalized: {}) trying to join own room", joinDto.getPlayerId(), normalizedPlayerId);
             throw new IllegalStateException("No puedes unirte a tu propia sala.");
         }
         
-        roomInfo.setGuestId(joinDto.getPlayerId());
+        roomInfo.setGuestId(normalizedPlayerId);  // Guardar ID normalizado
         roomInfo.setGuestName(joinDto.getPlayerName());
         roomInfo.setFull(true);
         roomInfo.setStatus(RoomInfoDto.RoomStatus.READY);
         
-        playerToRoom.put(joinDto.getPlayerId(), roomCode);
+        playerToRoom.put(normalizedPlayerId, roomCode);  // Usar ID normalizado como clave
         
         String gameId = gameService.createGame(roomInfo.getHostId(), roomInfo.getGuestId());
         roomInfo.setGameId(gameId);
         roomInfo.setStatus(RoomInfoDto.RoomStatus.IN_PROGRESS);
         
-        log.info("Player {} joined room {}. Game {} created.", joinDto.getPlayerId(), roomCode, gameId);
+        log.info("Player {} (normalized: {}) joined room {}. Game {} created.", joinDto.getPlayerId(), normalizedPlayerId, roomCode, gameId);
         
         return roomInfo;
     }
@@ -116,13 +153,20 @@ public class RoomService {
     }
 
     public String getRoomCodeForPlayer(String playerId) {
-        return playerToRoom.get(playerId);
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        return normalizedPlayerId != null ? playerToRoom.get(normalizedPlayerId) : null;
     }
 
     public void leaveRoom(String playerId) {
-        String roomCode = playerToRoom.remove(playerId);
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        if (normalizedPlayerId == null) {
+            log.warn("Cannot leave room: playerId is null");
+            return;
+        }
+        
+        String roomCode = playerToRoom.remove(normalizedPlayerId);
         if (roomCode == null) {
-            log.debug("Player {} not in any room", playerId);
+            log.debug("Player {} (normalized: {}) not in any room", playerId, normalizedPlayerId);
             return;
         }
         
@@ -131,11 +175,15 @@ public class RoomService {
             return;
         }
         
-        log.info("Player {} leaving room {}", playerId, roomCode);
+        log.info("Player {} (normalized: {}) leaving room {}", playerId, normalizedPlayerId, roomCode);
         
-        if (roomInfo.getHostId().equals(playerId) || roomInfo.getStatus() == RoomInfoDto.RoomStatus.WAITING) {
+        // Comparar con IDs normalizados
+        if ((roomInfo.getHostId() != null && roomInfo.getHostId().equals(normalizedPlayerId)) || 
+            roomInfo.getStatus() == RoomInfoDto.RoomStatus.WAITING) {
             rooms.remove(roomCode);
-            playerToRoom.remove(roomInfo.getHostId());
+            if (roomInfo.getHostId() != null) {
+                playerToRoom.remove(roomInfo.getHostId());
+            }
             if (roomInfo.getGuestId() != null) {
                 playerToRoom.remove(roomInfo.getGuestId());
             }
@@ -161,5 +209,23 @@ public class RoomService {
 
     public Map<String, RoomInfoDto> getAllRooms() {
         return new ConcurrentHashMap<>(rooms);
+    }
+    
+    /**
+     * Método de debugging para obtener información sobre las salas activas
+     */
+    public String getDebugInfo() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Total rooms: ").append(rooms.size()).append("\n");
+        sb.append("Room codes: ").append(rooms.keySet()).append("\n");
+        rooms.forEach((code, roomInfo) -> {
+            sb.append("  Room ").append(code).append(": ")
+              .append("host=").append(roomInfo.getHostId())
+              .append(", guest=").append(roomInfo.getGuestId() != null ? roomInfo.getGuestId() : "none")
+              .append(", status=").append(roomInfo.getStatus())
+              .append(", full=").append(roomInfo.isFull())
+              .append("\n");
+        });
+        return sb.toString();
     }
 }

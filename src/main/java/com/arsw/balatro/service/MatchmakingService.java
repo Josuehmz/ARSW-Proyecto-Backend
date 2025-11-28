@@ -59,51 +59,88 @@ public class MatchmakingService {
     }
 
     public QueueStatusDto addToQueue(String playerId) {
+        // Normalizar playerId para consistencia (trim + lowercase)
+        String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+        if (normalizedPlayerId == null) {
+            log.error("Cannot add null playerId to queue");
+            throw new IllegalArgumentException("PlayerId cannot be null");
+        }
+        
         log.info("=== ADDING PLAYER TO QUEUE ===");
-        log.info("Player ID: {}", playerId);
+        log.info("Player ID (original): {}", playerId);
+        log.info("Player ID (normalized): {}", normalizedPlayerId);
         log.info("Current queue size BEFORE: {}", matchmakingQueue.size());
         log.info("Players in map BEFORE: {}", playersInQueue.keySet());
         
-        if (playersInQueue.containsKey(playerId)) {
-            log.warn("Player {} already in queue", playerId);
-            return getQueueStatus(playerId);
+        // Verificar si ya está en la cola usando el ID normalizado
+        if (playersInQueue.containsKey(normalizedPlayerId)) {
+            log.warn("Player {} (normalized: {}) already in queue", playerId, normalizedPlayerId);
+            return getQueueStatus(normalizedPlayerId);
+        }
+        
+        // Verificar que la sesión esté registrada
+        String sessionId = sessionService.getSessionId(normalizedPlayerId);
+        if (sessionId == null) {
+            log.warn("⚠️ Player {} (normalized: {}) added to queue but no session found. Session may not be registered yet.", 
+                playerId, normalizedPlayerId);
+            log.warn("💡 Debug info: {}", sessionService.getDebugInfo());
+        } else {
+            log.info("✅ Session found for player {} (normalized: {}): {}", playerId, normalizedPlayerId, sessionId);
         }
         
         PlayerInQueue player = new PlayerInQueue(
-            playerId,
+            normalizedPlayerId,  // Usar el ID normalizado en la cola
             Instant.now(),
             null
         );
         
         matchmakingQueue.offer(player);
-        playersInQueue.put(playerId, player);
+        playersInQueue.put(normalizedPlayerId, player);  // Usar el ID normalizado como clave
         
-        log.info("Player {} added to queue successfully", playerId);
+        log.info("Player {} (normalized: {}) added to queue successfully", playerId, normalizedPlayerId);
         log.info("Queue size AFTER: {}", matchmakingQueue.size());
         log.info("Players in queue: {}", playersInQueue.keySet());
         log.info("=== ATTEMPTING MATCHMAKING ===");
         
         tryMatchmaking();
         
-        return getQueueStatus(playerId);
+        return getQueueStatus(normalizedPlayerId);
     }
 
     public void removeFromQueue(String playerId) {
-        PlayerInQueue player = playersInQueue.remove(playerId);
+        // Normalizar playerId para consistencia
+        String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+        if (normalizedPlayerId == null) {
+            log.warn("Cannot remove null playerId from queue");
+            return;
+        }
+        PlayerInQueue player = playersInQueue.remove(normalizedPlayerId);
         if (player != null) {
             matchmakingQueue.remove(player);
-            log.info("Player {} removed from queue. Queue size: {}", playerId, matchmakingQueue.size());
+            log.info("Player {} (normalized: {}) removed from queue. Queue size: {}", 
+                playerId, normalizedPlayerId, matchmakingQueue.size());
         }
     }
 
     public QueueStatusDto getQueueStatus(String playerId) {
-        boolean inQueue = playersInQueue.containsKey(playerId);
+        // Normalizar playerId para consistencia
+        String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+        if (normalizedPlayerId == null) {
+            return QueueStatusDto.builder()
+                .playerId(playerId)
+                .inQueue(false)
+                .queuePosition(null)
+                .playersInQueue(matchmakingQueue.size())
+                .estimatedWaitTime(estimateWaitTime(matchmakingQueue.size()))
+                .build();
+        }
+        boolean inQueue = playersInQueue.containsKey(normalizedPlayerId);
         int queueSize = matchmakingQueue.size();
         
         return QueueStatusDto.builder()
-            .playerId(playerId)
+            .playerId(normalizedPlayerId)  // Devolver el ID normalizado
             .inQueue(inQueue)
-            .queuePosition(inQueue ? getQueuePosition(playerId) : null)
+            .queuePosition(inQueue ? getQueuePosition(normalizedPlayerId) : null)
             .playersInQueue(queueSize)
             .estimatedWaitTime(estimateWaitTime(queueSize))
             .build();
@@ -140,7 +177,9 @@ public class MatchmakingService {
     }
 
     private void createMatch(String player1Id, String player2Id) {
+        // Los playerIds ya están normalizados porque vienen de la cola
         log.info("Creating match between {} and {}", player1Id, player2Id);
+        log.info("💡 Debug info before creating match: {}", sessionService.getDebugInfo());
         
         try {
             String gameId = gameService.createGame(player1Id, player2Id);
@@ -161,36 +200,53 @@ public class MatchmakingService {
                 matchData
             );
             
-            String session1 = sessionService.getSessionId(player1Id);
-            String session2 = sessionService.getSessionId(player2Id);
+            // Verificar que las sesiones estén registradas
+            String session1Id = sessionService.getSessionId(player1Id);
+            String session2Id = sessionService.getSessionId(player2Id);
             
-            if (session1 != null) {
+            log.info("🔍 Looking for sessions: player1Id={}, session1Id={}, player2Id={}, session2Id={}", 
+                player1Id, session1Id, player2Id, session2Id);
+            
+            // IMPORTANTE: convertAndSendToUser espera el username (Principal.getName()), no el sessionId
+            // Spring WebSocket mapea automáticamente el username a las sesiones activas
+            // Los playerIds ya están normalizados y coinciden con el Principal.getName()
+            
+            if (session1Id != null) {
+                // Usar el playerId (username) directamente, no el sessionId
                 messagingTemplate.convertAndSendToUser(
-                    session1,
+                    player1Id,  // Usar el username (Principal name), no el sessionId
                     "/queue/matchmaking",
                     matchFoundMsg
                 );
-                log.info("Match notification sent to player {} (session: {})", player1Id, session1);
+                log.info("✅ Match notification sent to player {} (username, sessionId: {})", player1Id, session1Id);
             } else {
-                log.warn("No session found for player {}", player1Id);
+                log.error("❌ No session found for player {} (normalized: {})", player1Id, player1Id);
+                log.error("💡 Debug info: {}", sessionService.getDebugInfo());
             }
             
-            if (session2 != null) {
+            if (session2Id != null) {
+                // Usar el playerId (username) directamente, no el sessionId
                 messagingTemplate.convertAndSendToUser(
-                    session2,
+                    player2Id,  // Usar el username (Principal name), no el sessionId
                     "/queue/matchmaking",
                     matchFoundMsg
                 );
-                log.info("Match notification sent to player {} (session: {})", player2Id, session2);
+                log.info("✅ Match notification sent to player {} (username, sessionId: {})", player2Id, session2Id);
             } else {
-                log.warn("No session found for player {}", player2Id);
+                log.error("❌ No session found for player {} (normalized: {})", player2Id, player2Id);
+                log.error("💡 Debug info: {}", sessionService.getDebugInfo());
             }
             
-            log.info("Match created successfully. Game ID: {}", gameId);
+            if (session1Id != null && session2Id != null) {
+                log.info("✅ Match created successfully. Game ID: {}", gameId);
+            } else {
+                log.error("❌ Match created but notifications may not have been sent. Game ID: {}", gameId);
+            }
             
         } catch (Exception e) {
-            log.error("Error creating match: {}", e.getMessage());
+            log.error("❌ Error creating match: {}", e.getMessage(), e);
             
+            // Re-agregar a la cola con IDs normalizados
             matchmakingQueue.offer(new PlayerInQueue(player1Id, Instant.now(), null));
             matchmakingQueue.offer(new PlayerInQueue(player2Id, Instant.now(), null));
             playersInQueue.put(player1Id, new PlayerInQueue(player1Id, Instant.now(), null));
@@ -198,10 +254,10 @@ public class MatchmakingService {
         }
     }
 
-    private int getQueuePosition(String playerId) {
+    private int getQueuePosition(String normalizedPlayerId) {
         int position = 1;
         for (PlayerInQueue player : matchmakingQueue) {
-            if (player.playerId.equals(playerId)) {
+            if (player.playerId.equals(normalizedPlayerId)) {
                 return position;
             }
             position++;
@@ -230,6 +286,7 @@ public class MatchmakingService {
             
             for (String playerId : playersInQueue.keySet()) {
                 try {
+                    // Verificar que la sesión esté registrada
                     String sessionId = sessionService.getSessionId(playerId);
                     if (sessionId == null) {
                         log.warn("No session found for player {} in queue", playerId);
@@ -245,8 +302,9 @@ public class MatchmakingService {
                         status
                     );
                     
+                    // IMPORTANTE: convertAndSendToUser espera el username (Principal.getName()), no el sessionId
                     messagingTemplate.convertAndSendToUser(
-                        sessionId,
+                        playerId,  // Usar el username (Principal name), no el sessionId
                         "/queue/matchmaking",
                         update
                     );

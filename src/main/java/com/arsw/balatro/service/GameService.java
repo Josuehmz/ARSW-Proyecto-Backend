@@ -19,23 +19,43 @@ public class GameService {
     private final Map<String, GameState> activeGames = new ConcurrentHashMap<>();
     private final Map<String, String> playerToGame = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    
+    /**
+     * Normaliza un playerId: trim + lowercase
+     * Esto asegura consistencia en las comparaciones
+     */
+    private String normalizePlayerId(String playerId) {
+        if (playerId == null) {
+            return null;
+        }
+        return playerId.trim().toLowerCase();
+    }
 
     public String createGame(String player1Id, String player2Id) {
+        // Normalizar playerIds para consistencia
+        String normalizedPlayer1Id = normalizePlayerId(player1Id);
+        String normalizedPlayer2Id = normalizePlayerId(player2Id);
+        
+        if (normalizedPlayer1Id == null || normalizedPlayer2Id == null) {
+            throw new IllegalArgumentException("PlayerIds no pueden ser null");
+        }
+        
         String gameId = UUID.randomUUID().toString();
         
-        log.info("Creating new game {} for players {} and {}", gameId, player1Id, player2Id);
+        log.info("Creating new game {} for players {} (normalized: {}) and {} (normalized: {})", 
+            gameId, player1Id, normalizedPlayer1Id, player2Id, normalizedPlayer2Id);
         
         GameState gameState = GameState.builder()
             .gameId(gameId)
-            .player1Id(player1Id)
-            .player2Id(player2Id)
+            .player1Id(normalizedPlayer1Id)  // Guardar IDs normalizados
+            .player2Id(normalizedPlayer2Id)
             .createdAt(System.currentTimeMillis())
             .lastUpdate(System.currentTimeMillis())
             .build();
         
         activeGames.put(gameId, gameState);
-        playerToGame.put(player1Id, gameId);
-        playerToGame.put(player2Id, gameId);
+        playerToGame.put(normalizedPlayer1Id, gameId);  // Usar IDs normalizados como clave
+        playerToGame.put(normalizedPlayer2Id, gameId);
         
         log.info("Game {} created successfully", gameId);
         
@@ -51,22 +71,31 @@ public class GameService {
     }
 
     public String getActiveGameIdForPlayer(String playerId) {
-        return playerToGame.get(playerId);
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        return normalizedPlayerId != null ? playerToGame.get(normalizedPlayerId) : null;
     }
 
     public boolean isPlayerInGame(String gameId, String playerId) {
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        if (normalizedPlayerId == null) {
+            return false;
+        }
         GameState state = activeGames.get(gameId);
         if (state == null) {
             return false;
         }
-        return state.getPlayer1Id().equals(playerId) || state.getPlayer2Id().equals(playerId);
+        return state.getPlayer1Id().equals(normalizedPlayerId) || state.getPlayer2Id().equals(normalizedPlayerId);
     }
 
     public String getOpponentId(String gameId, String playerId) {
+        String normalizedPlayerId = normalizePlayerId(playerId);
+        if (normalizedPlayerId == null) {
+            throw new IllegalArgumentException("PlayerId no puede ser null");
+        }
         GameState state = getGameState(gameId);
-        if (state.getPlayer1Id().equals(playerId)) {
+        if (state.getPlayer1Id().equals(normalizedPlayerId)) {
             return state.getPlayer2Id();
-        } else if (state.getPlayer2Id().equals(playerId)) {
+        } else if (state.getPlayer2Id().equals(normalizedPlayerId)) {
             return state.getPlayer1Id();
         }
         throw new IllegalArgumentException("Player not in this game");

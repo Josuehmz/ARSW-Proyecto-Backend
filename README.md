@@ -337,24 +337,99 @@ Este DTO fue completamente eliminado. Ya no se necesita porque el backend no pro
 
 ## 🔄 Protocolo de Comunicación (Simplificado)
 
-### Conexión Inicial (Sin cambios)
+### Conexión Inicial con Autenticación Cognito
+
+**⚠️ IMPORTANTE:** El backend requiere autenticación con token JWT de AWS Cognito. Debes enviar el token en el header `Authorization` del mensaje STOMP CONNECT.
 
 ```javascript
-const socket = new SockJS('http://localhost:8080/ws');
-const stompClient = Stomp.over(socket);
+// Obtener el token de Cognito (ejemplo con AWS Amplify)
+import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
 
-stompClient.connect({}, function(frame) {
-    console.log('Conectado al servidor');
+async function connectWebSocket() {
+    try {
+        // Obtener el token de acceso de Cognito
+        const session = await fetchAuthSession();
+        const token = session.tokens?.accessToken?.toString();
+        
+        if (!token) {
+            console.error('❌ No se encontró token de autenticación');
+            return;
+        }
+        
+        // Crear conexión WebSocket
+        const socket = new SockJS('http://localhost:8080/ws');
+        const stompClient = Stomp.over(socket);
+        
+        // Conectar con el token en los headers
+        stompClient.connect({
+            'Authorization': `Bearer ${token}`
+        }, function(frame) {
+            console.log('✅ Conectado al servidor');
+            
+            // Suscribirse a notificaciones de matchmaking
+            stompClient.subscribe('/user/queue/matchmaking', function(message) {
+                const data = JSON.parse(message.body);
+                if (data.type === 'MATCH_FOUND') {
+                    // Unirse al juego
+                }
+            });
+        }, function(error) {
+            console.error('❌ Error de conexión:', error);
+            console.error('💡 Verifica que el token sea válido y no haya expirado');
+        });
+        
+    } catch (error) {
+        console.error('❌ Error al obtener token:', error);
+    }
+}
+```
+
+**Ejemplo con @stomp/stompjs (versión moderna):**
+
+```javascript
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+
+async function connectWebSocket() {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.accessToken?.toString();
     
-    // Suscribirse a notificaciones de matchmaking
-    stompClient.subscribe('/user/queue/matchmaking', function(message) {
-        const data = JSON.parse(message.body);
-        if (data.type === 'MATCH_FOUND') {
-            // Unirse al juego
+    if (!token) {
+        throw new Error('No se encontró token de autenticación');
+    }
+    
+    const client = new Client({
+        webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+        connectHeaders: {
+            'Authorization': `Bearer ${token}`
+        },
+        onConnect: (frame) => {
+            console.log('✅ Conectado al servidor');
+            
+            // Suscribirse a notificaciones
+            client.subscribe('/user/queue/matchmaking', (message) => {
+                const data = JSON.parse(message.body);
+                // Manejar mensaje
+            });
+        },
+        onStompError: (frame) => {
+            console.error('❌ Error STOMP:', frame);
+            console.error('💡 Verifica que el token sea válido');
+        },
+        onWebSocketError: (event) => {
+            console.error('❌ Error WebSocket:', event);
         }
     });
-});
+    
+    client.activate();
+    return client;
+}
 ```
+
+**Errores comunes:**
+- ❌ `400 Bad Request` de Cognito: El token puede estar expirado o ser inválido
+- ❌ `Failed to send message to ExecutorSubscribableChannel`: El token no se está enviando correctamente en el header `Authorization`
+- ❌ `Token de autenticación requerido`: El frontend no está enviando el header `Authorization` en el mensaje CONNECT
 
 ### Flujo Completo de una Partida (Simplificado)
 
