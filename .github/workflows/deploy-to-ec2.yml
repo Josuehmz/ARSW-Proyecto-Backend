@@ -27,6 +27,7 @@ jobs:
   build-and-push:
     name: Build and Push image to ECR
     runs-on: ubuntu-latest
+    environment: staging
     steps:
       - name: Checkout
         uses: actions/checkout@v4
