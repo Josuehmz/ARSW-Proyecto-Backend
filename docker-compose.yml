@@ -10,6 +10,16 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xms256m -Xmx512m
+      # WebSocket & CORS Configuration
+      - SPRING_WEBSOCKET_SERVLET_ALLOWED_ORIGINS=*
+      - CORS_ALLOWED_ORIGINS=*
+      - CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE,OPTIONS
+      - CORS_ALLOWED_HEADERS=*
+      - CORS_ALLOW_CREDENTIALS=true
+      # AWS Cognito Configuration (REQUIRED)
+      - AWS_COGNITO_REGION=${AWS_COGNITO_REGION:-us-east-1}
+      - AWS_COGNITO_USER_POOL_ID=${AWS_COGNITO_USER_POOL_ID}
+      - AWS_COGNITO_CLIENT_ID=${AWS_COGNITO_CLIENT_ID}
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 30s
