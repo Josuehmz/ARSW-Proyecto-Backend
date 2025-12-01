@@ -6,9 +6,9 @@ on:
       - despliegue
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  ECR_REPOSITORY: backend
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 654654254246
+  ECR_REPOSITORY: balatro
 
 jobs:
   build-and-push:
@@ -23,6 +23,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to ECR
@@ -72,7 +73,7 @@ jobs:
 
             # Authenticate to ECR on the instance (requires AWS CLI configured on the instance
             # or Instance Profile with ECR permissions). If the instance has IAM role, no static creds needed.
-            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com || true
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com || true
 
             # Pull latest image (if available)
             docker-compose pull || true
