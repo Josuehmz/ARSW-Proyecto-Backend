@@ -11,6 +11,19 @@ env:
   ECR_REPOSITORY: balatro
 
 jobs:
+  prepare-matrix:
+    name: Prepare host matrix
+    runs-on: ubuntu-latest
+    outputs:
+      hosts: ${{ steps.set-hosts.outputs.hosts }}
+    steps:
+      - name: Build hosts JSON
+        id: set-hosts
+        run: |
+          # Build a JSON array from secrets (allows using secret values at runtime)
+          hosts_json="[\"${{ secrets.EC2_HOST_1 }}\",\"${{ secrets.EC2_HOST_2 }}\"]"
+          echo "hosts=${hosts_json}" >> $GITHUB_OUTPUT
+
   build-and-push:
     name: Build and Push image to ECR
     runs-on: ubuntu-latest
@@ -40,12 +53,11 @@ jobs:
 
   deploy:
     name: Deploy to EC2 (parallel)
-    needs: build-and-push
+    needs: [build-and-push, prepare-matrix]
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Build matrix from secrets using fromJson to avoid evaluation errors
-        host: ${{ fromJson('['"'"' + secrets.EC2_HOST_1 + '"'"','"'"' + secrets.EC2_HOST_2 + '"'"']') }}
+        host: ${{ fromJson(needs.prepare-matrix.outputs.hosts) }}
     environment: staging
     steps:
       - name: Show target
