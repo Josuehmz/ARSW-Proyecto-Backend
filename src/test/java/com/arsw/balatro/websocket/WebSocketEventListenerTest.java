@@ -64,7 +64,7 @@ class WebSocketEventListenerTest {
     void testHandleWebSocketConnectListener_ShouldLogConnection() {
         // Given
         try (MockedStatic<StompHeaderAccessor> mockedStatic = mockStatic(StompHeaderAccessor.class)) {
-            mockedStatic.when(() -> StompHeaderAccessor.wrap(any(Message.class))).thenReturn(headerAccessor);
+            mockedStatic.when(() -> StompHeaderAccessor.wrap(message)).thenReturn(headerAccessor);
 
             // When
             webSocketEventListener.handleWebSocketConnectListener(connectedEvent);
@@ -81,7 +81,7 @@ class WebSocketEventListenerTest {
         String gameId = "game123";
         
         try (MockedStatic<StompHeaderAccessor> mockedStatic = mockStatic(StompHeaderAccessor.class)) {
-            mockedStatic.when(() -> StompHeaderAccessor.wrap(any(Message.class))).thenReturn(headerAccessor);
+            mockedStatic.when(() -> StompHeaderAccessor.wrap(message)).thenReturn(headerAccessor);
             when(sessionService.getPlayerId("session123")).thenReturn(playerId);
             when(gameService.getActiveGameIdForPlayer(playerId)).thenReturn(gameId);
 
@@ -104,7 +104,7 @@ class WebSocketEventListenerTest {
         Principal principal = mock(Principal.class);
         
         try (MockedStatic<StompHeaderAccessor> mockedStatic = mockStatic(StompHeaderAccessor.class)) {
-            mockedStatic.when(() -> StompHeaderAccessor.wrap(any(Message.class))).thenReturn(headerAccessor);
+            mockedStatic.when(() -> StompHeaderAccessor.wrap(message)).thenReturn(headerAccessor);
             when(sessionService.getPlayerId("session123")).thenReturn(null);
             when(headerAccessor.getUser()).thenReturn(principal);
             when(principal.getName()).thenReturn(principalName);
@@ -124,7 +124,7 @@ class WebSocketEventListenerTest {
     void testHandleWebSocketDisconnectListener_WhenNoPlayerIdAndNoPrincipal_ShouldOnlyRemoveSession() {
         // Given
         try (MockedStatic<StompHeaderAccessor> mockedStatic = mockStatic(StompHeaderAccessor.class)) {
-            mockedStatic.when(() -> StompHeaderAccessor.wrap(any(Message.class))).thenReturn(headerAccessor);
+            mockedStatic.when(() -> StompHeaderAccessor.wrap(message)).thenReturn(headerAccessor);
             when(sessionService.getPlayerId("session123")).thenReturn(null);
             when(headerAccessor.getUser()).thenReturn(null);
 
@@ -145,7 +145,7 @@ class WebSocketEventListenerTest {
         String playerId = "player1";
         
         try (MockedStatic<StompHeaderAccessor> mockedStatic = mockStatic(StompHeaderAccessor.class)) {
-            mockedStatic.when(() -> StompHeaderAccessor.wrap(any(Message.class))).thenReturn(headerAccessor);
+            mockedStatic.when(() -> StompHeaderAccessor.wrap(message)).thenReturn(headerAccessor);
             when(sessionService.getPlayerId("session123")).thenReturn(playerId);
             when(gameService.getActiveGameIdForPlayer(playerId)).thenReturn(null);
 
@@ -167,7 +167,7 @@ class WebSocketEventListenerTest {
         String playerId = "player1";
         
         try (MockedStatic<StompHeaderAccessor> mockedStatic = mockStatic(StompHeaderAccessor.class)) {
-            mockedStatic.when(() -> StompHeaderAccessor.wrap(any(Message.class))).thenReturn(headerAccessor);
+            mockedStatic.when(() -> StompHeaderAccessor.wrap(message)).thenReturn(headerAccessor);
             when(sessionService.getPlayerId("session123")).thenReturn(playerId);
             when(gameService.getActiveGameIdForPlayer(playerId)).thenThrow(new RuntimeException("Test exception"));
 

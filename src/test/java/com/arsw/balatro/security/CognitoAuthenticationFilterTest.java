@@ -52,7 +52,6 @@ class CognitoAuthenticationFilterTest {
         SecurityContextHolder.clearContext();
         stringWriter = new StringWriter();
         printWriter = new PrintWriter(stringWriter);
-        when(response.getWriter()).thenReturn(printWriter);
     }
 
     @Test
@@ -87,6 +86,7 @@ class CognitoAuthenticationFilterTest {
         // Given
         when(request.getRequestURI()).thenReturn("/ws");
         when(request.getHeader("Upgrade")).thenReturn(null);
+        when(response.getWriter()).thenReturn(printWriter);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
@@ -103,6 +103,7 @@ class CognitoAuthenticationFilterTest {
         // Given
         when(request.getRequestURI()).thenReturn("/api/test");
         when(request.getHeader("Authorization")).thenReturn(null);
+        when(response.getWriter()).thenReturn(printWriter);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
@@ -118,6 +119,7 @@ class CognitoAuthenticationFilterTest {
         // Given
         when(request.getRequestURI()).thenReturn("/api/test");
         when(request.getHeader("Authorization")).thenReturn("Invalid token");
+        when(response.getWriter()).thenReturn(printWriter);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
@@ -161,6 +163,7 @@ class CognitoAuthenticationFilterTest {
         when(request.getHeader("Authorization")).thenReturn(token);
         when(tokenValidationService.extractTokenFromHeader(token)).thenReturn("invalid-token");
         when(tokenValidationService.validateToken("invalid-token")).thenThrow(exception);
+        when(response.getWriter()).thenReturn(printWriter);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
@@ -181,6 +184,7 @@ class CognitoAuthenticationFilterTest {
         when(request.getRequestURI()).thenReturn("/api/test");
         when(request.getHeader("Authorization")).thenReturn(token);
         when(tokenValidationService.extractTokenFromHeader(token)).thenThrow(exception);
+        when(response.getWriter()).thenReturn(printWriter);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
