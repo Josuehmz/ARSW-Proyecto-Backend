@@ -6,15 +6,24 @@ import org.springframework.test.context.ActiveProfiles;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
-@SpringBootTest
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.NONE,
+    properties = {
+        "aws.cognito.user-pool-id=us-east-1_TEST123",
+        "aws.cognito.client-id=test-client-id",
+        "aws.cognito.region=us-east-1",
+        "aws.cognito.jwk-url=https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TEST123/.well-known/jwks.json"
+    }
+)
 @ActiveProfiles("test")
 class BalatroBackendApplicationTest {
 
     @Test
     void testApplicationContextLoads() {
         // Verificar que la aplicación puede iniciar sin errores
+        // El contexto de Spring se carga automáticamente con @SpringBootTest
         assertDoesNotThrow(() -> {
-            // El contexto de Spring se carga automáticamente con @SpringBootTest
+            // Si llegamos aquí, el contexto se cargó correctamente
         });
     }
 
