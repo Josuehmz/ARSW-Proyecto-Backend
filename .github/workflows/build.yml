@@ -42,11 +42,18 @@ jobs:
         run: |
           mvn -B verify
           if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
+            # Verificar que el reporte XML existe
+            if [ -f "target/site/jacoco/jacoco.xml" ]; then
+              echo "✅ JaCoCo XML report found at target/site/jacoco/jacoco.xml"
+              ls -lh target/site/jacoco/
+            else
+              echo "⚠️ Warning: JaCoCo XML report not found. Coverage may not be available."
+              echo "Checking target/site/jacoco/ directory:"
+              ls -la target/site/jacoco/ 2>/dev/null || echo "Directory does not exist"
+            fi
             mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
               -Dsonar.projectKey=Arsw-Balatro \
-              -Dsonar.projectName='Arsw Balatro' \
-              -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-              -Dsonar.java.coveragePlugin=jacoco || echo "SonarQube analysis skipped (secrets not configured)"
+              -Dsonar.projectName='Arsw Balatro' || echo "SonarQube analysis skipped (secrets not configured)"
           else
             echo "SonarQube analysis skipped (SONAR_TOKEN or SONAR_HOST_URL not configured)"
           fi
