@@ -44,7 +44,9 @@ jobs:
           if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ]; then
             mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
               -Dsonar.projectKey=Arsw-Balatro \
-              -Dsonar.projectName='Arsw Balatro' || echo "SonarQube analysis skipped (secrets not configured)"
+              -Dsonar.projectName='Arsw Balatro' \
+              -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+              -Dsonar.java.coveragePlugin=jacoco || echo "SonarQube analysis skipped (secrets not configured)"
           else
             echo "SonarQube analysis skipped (SONAR_TOKEN or SONAR_HOST_URL not configured)"
           fi
