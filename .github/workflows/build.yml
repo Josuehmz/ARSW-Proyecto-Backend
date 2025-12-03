@@ -53,7 +53,9 @@ jobs:
             fi
             mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
               -Dsonar.projectKey=Arsw-Balatro \
-              -Dsonar.projectName='Arsw Balatro' || echo "SonarQube analysis skipped (secrets not configured)"
+              -Dsonar.projectName='Arsw Balatro' \
+              -Dsonar.host.url=$SONAR_HOST_URL \
+              -Dsonar.login=$SONAR_TOKEN || echo "SonarQube analysis skipped (secrets not configured)"
           else
             echo "SonarQube analysis skipped (SONAR_TOKEN or SONAR_HOST_URL not configured)"
           fi
