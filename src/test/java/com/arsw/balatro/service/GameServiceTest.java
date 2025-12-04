@@ -304,6 +304,38 @@ class GameServiceTest {
         assertEquals(gameId1, gameService.getActiveGameIdForPlayer("player1"));
         assertEquals(gameId2, gameService.getActiveGameIdForPlayer("player3"));
     }
+
+    @Test
+    @DisplayName("Should schedule game cleanup")
+    void shouldScheduleGameCleanup() throws InterruptedException {
+        // Given
+        String player1Id = "player1";
+        String player2Id = "player2";
+        String gameId = gameService.createGame(player1Id, player2Id);
+
+        // When
+        gameService.scheduleGameCleanup(gameId, 1); // 1 second delay
+
+        // Then - Wait for cleanup to execute
+        Thread.sleep(1500); // Wait a bit more than 1 second
+
+        // Verify game was cleaned up
+        assertThrows(IllegalArgumentException.class, () -> {
+            gameService.getGameState(gameId);
+        });
+        assertNull(gameService.getActiveGameIdForPlayer(player1Id));
+        assertNull(gameService.getActiveGameIdForPlayer(player2Id));
+    }
+
+    @Test
+    @DisplayName("Should return null for null playerId when getting active game")
+    void shouldReturnNullForNullPlayerIdWhenGettingActiveGame() {
+        // When
+        String gameId = gameService.getActiveGameIdForPlayer(null);
+
+        // Then
+        assertNull(gameId);
+    }
 }
 
 

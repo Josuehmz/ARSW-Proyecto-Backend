@@ -190,6 +190,61 @@ class CognitoWebSocketHandshakeInterceptorTest {
     }
 
     @Test
+    void testValidateAndExtractPrincipal_WhenEmptyUsername_ShouldThrowSecurityException() {
+        // Given
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.addNativeHeader("Authorization", "Bearer valid-token");
+        
+        DecodedJWT decodedJWT = createMockJWT("");
+        when(tokenValidationService.extractTokenFromHeader("Bearer valid-token"))
+            .thenReturn("valid-token");
+        when(tokenValidationService.validateToken("valid-token"))
+            .thenReturn(decodedJWT);
+        when(tokenValidationService.extractUsername(decodedJWT))
+            .thenReturn(""); // Empty username
+
+        // When & Then
+        assertThrows(SecurityException.class, () -> {
+            interceptor.validateAndExtractPrincipal(accessor);
+        });
+    }
+
+    @Test
+    void testValidateAndExtractPrincipal_WhenNullUsername_ShouldThrowSecurityException() {
+        // Given
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.addNativeHeader("Authorization", "Bearer valid-token");
+        
+        DecodedJWT decodedJWT = createMockJWT(null);
+        when(tokenValidationService.extractTokenFromHeader("Bearer valid-token"))
+            .thenReturn("valid-token");
+        when(tokenValidationService.validateToken("valid-token"))
+            .thenReturn(decodedJWT);
+        when(tokenValidationService.extractUsername(decodedJWT))
+            .thenReturn(null); // Null username
+
+        // When & Then
+        assertThrows(SecurityException.class, () -> {
+            interceptor.validateAndExtractPrincipal(accessor);
+        });
+    }
+
+    @Test
+    void testValidateAndExtractPrincipal_WhenGeneralException_ShouldThrowSecurityException() {
+        // Given
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.addNativeHeader("Authorization", "Bearer valid-token");
+        
+        when(tokenValidationService.extractTokenFromHeader("Bearer valid-token"))
+            .thenThrow(new RuntimeException("Unexpected error"));
+
+        // When & Then
+        assertThrows(SecurityException.class, () -> {
+            interceptor.validateAndExtractPrincipal(accessor);
+        });
+    }
+
+    @Test
     void testCognitoPrincipal_ShouldReturnName() {
         // Given
         DecodedJWT decodedJWT = createMockJWT("player1");

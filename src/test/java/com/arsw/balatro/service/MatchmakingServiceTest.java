@@ -298,6 +298,47 @@ class MatchmakingServiceTest {
             matchmakingService.removeFromQueue(null);
         });
     }
+
+    @Test
+    @DisplayName("Should initialize scheduler on PostConstruct")
+    void shouldInitializeSchedulerOnPostConstruct() {
+        // When
+        matchmakingService.init();
+
+        // Then - Verify scheduler is initialized (no exception thrown)
+        assertDoesNotThrow(() -> {
+            matchmakingService.cleanup();
+        });
+    }
+
+    @Test
+    @DisplayName("Should cleanup scheduler on PreDestroy")
+    void shouldCleanupSchedulerOnPreDestroy() throws InterruptedException {
+        // Given
+        matchmakingService.init();
+
+        // When
+        matchmakingService.cleanup();
+
+        // Then - Should not throw exception
+        // Verify cleanup can be called multiple times
+        assertDoesNotThrow(() -> {
+            matchmakingService.cleanup();
+        });
+    }
+
+    @Test
+    @DisplayName("Should get queue status with null playerId")
+    void shouldGetQueueStatusWithNullPlayerId() {
+        // When
+        QueueStatusDto status = matchmakingService.getQueueStatus(null);
+
+        // Then
+        assertNotNull(status);
+        assertFalse(status.isInQueue());
+        assertNull(status.getQueuePosition());
+        assertNotNull(status.getPlayersInQueue());
+    }
 }
 
 

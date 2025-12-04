@@ -394,5 +394,270 @@ class GameWebSocketControllerTest {
         // Should not throw exception, just log error
         verify(roomService).leaveRoom("player1");
     }
+
+    @Test
+    @DisplayName("Should not create room with missing roomCode")
+    void shouldNotCreateRoomWithMissingRoomCode() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setType(MessageType.CREATE_ROOM);
+        message.setPlayerId("player1");
+        message.setPayload(new HashMap<>()); // Empty payload
+
+        // When
+        controller.createRoom(message, principal, headerAccessor);
+
+        // Then
+        verify(roomService, never()).createRoom(any(CreateRoomDto.class));
+        verify(messagingTemplate).convertAndSendToUser(
+            eq("player1"),
+            eq("/queue/errors"),
+            any(GameMessage.class)
+        );
+    }
+
+    @Test
+    @DisplayName("Should not join room with missing roomCode")
+    void shouldNotJoinRoomWithMissingRoomCode() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setType(MessageType.JOIN_ROOM);
+        message.setPlayerId("player1");
+        message.setPayload(new HashMap<>()); // Empty payload
+
+        // When
+        controller.joinRoom(message, principal, headerAccessor);
+
+        // Then
+        verify(roomService, never()).joinRoom(any(JoinRoomDto.class));
+        verify(messagingTemplate).convertAndSendToUser(
+            eq("player1"),
+            eq("/queue/errors"),
+            any(GameMessage.class)
+        );
+    }
+
+    @Test
+    @DisplayName("Should not join matchmaking with null sessionId")
+    void shouldNotJoinMatchmakingWithNullSessionId() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setType(MessageType.JOIN_QUEUE);
+        message.setPlayerId("player1");
+        
+        when(headerAccessor.getSessionId()).thenReturn(null);
+
+        // When
+        controller.joinMatchmaking(message, principal, headerAccessor);
+
+        // Then
+        verify(sessionService, never()).registerSession(anyString(), anyString());
+        verify(messagingTemplate).convertAndSendToUser(
+            eq("player1"),
+            eq("/queue/errors"),
+            any(GameMessage.class)
+        );
+    }
+
+    @Test
+    @DisplayName("Should register session successfully")
+    void shouldRegisterSessionSuccessfully() {
+        // Given
+        Map<String, String> registration = new HashMap<>();
+        registration.put("playerId", "player1");
+        registration.put("timestamp", "2024-01-01T00:00:00.000Z");
+
+        // When
+        controller.registerSession(registration, principal, headerAccessor);
+
+        // Then
+        verify(sessionService).registerSession("player1", "session1");
+    }
+
+    @Test
+    @DisplayName("Should not register session with null sessionId")
+    void shouldNotRegisterSessionWithNullSessionId() {
+        // Given
+        Map<String, String> registration = new HashMap<>();
+        registration.put("playerId", "player1");
+        
+        when(headerAccessor.getSessionId()).thenReturn(null);
+
+        // When
+        controller.registerSession(registration, principal, headerAccessor);
+
+        // Then
+        verify(sessionService, never()).registerSession(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("Should register game session successfully")
+    void shouldRegisterGameSessionSuccessfully() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setPlayerId("player1");
+        String gameId = "game123";
+        
+        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+
+        // When
+        controller.registerGameSession(gameId, message, principal, headerAccessor);
+
+        // Then
+        verify(sessionService).registerSession("player1", "session1");
+    }
+
+    @Test
+    @DisplayName("Should not register game session if player not in game")
+    void shouldNotRegisterGameSessionIfPlayerNotInGame() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setPlayerId("player1");
+        String gameId = "game123";
+        
+        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(false);
+
+        // When
+        controller.registerGameSession(gameId, message, principal, headerAccessor);
+
+        // Then
+        verify(sessionService, never()).registerSession(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("Should handle game message successfully")
+    void shouldHandleGameMessageSuccessfully() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setType(MessageType.GAME_MESSAGE);
+        message.setPlayerId("player1");
+        String gameId = "game123";
+        
+        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+
+        // When
+        GameMessage result = controller.handleGameMessage(gameId, message, principal);
+
+        // Then
+        assertNotNull(result);
+        assertEquals("player1", result.getPlayerId());
+        assertEquals(gameId, result.getGameId());
+        verify(gameService).updateGameActivity(gameId);
+    }
+
+    @Test
+    @DisplayName("Should return error when player not in game")
+    void shouldReturnErrorWhenPlayerNotInGame() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setType(MessageType.GAME_MESSAGE);
+        message.setPlayerId("player1");
+        String gameId = "game123";
+        
+        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(false);
+
+        // When
+        GameMessage result = controller.handleGameMessage(gameId, message, principal);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(MessageType.ERROR, result.getType());
+    }
+
+    @Test
+    @DisplayName("Should relay game message successfully")
+    void shouldRelayGameMessageSuccessfully() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setType(MessageType.GAME_MESSAGE);
+        message.setPlayerId("player1");
+        String gameId = "game123";
+        
+        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+
+        // When
+        controller.relayGameMessage(gameId, message, principal);
+
+        // Then
+        verify(gameService).updateGameActivity(gameId);
+        verify(messagingTemplate).convertAndSend(
+            eq("/topic/game/" + gameId),
+            any(GameMessage.class)
+        );
+    }
+
+    @Test
+    @DisplayName("Should handle chat message successfully")
+    void shouldHandleChatMessageSuccessfully() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setMessage("Hello");
+        String gameId = "game123";
+
+        // When
+        GameMessage result = controller.handleChatMessage(gameId, message, principal);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(MessageType.CHAT_MESSAGE, result.getType());
+        assertEquals("player1", result.getPlayerId());
+        assertEquals(gameId, result.getGameId());
+    }
+
+    @Test
+    @DisplayName("Should handle chat message alt successfully")
+    void shouldHandleChatMessageAltSuccessfully() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setMessage("Hello");
+        String gameId = "game123";
+        
+        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+
+        // When
+        controller.handleChatMessageAlt(gameId, message, principal);
+
+        // Then
+        verify(messagingTemplate).convertAndSend(
+            eq("/topic/game/" + gameId + "/chat"),
+            any(GameMessage.class)
+        );
+    }
+
+    @Test
+    @DisplayName("Should handle emote successfully")
+    void shouldHandleEmoteSuccessfully() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setType(MessageType.PLAYER_EMOTE);
+        String gameId = "game123";
+
+        // When
+        GameMessage result = controller.handleEmote(gameId, message, principal);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(MessageType.PLAYER_EMOTE, result.getType());
+        assertEquals("player1", result.getPlayerId());
+        assertEquals(gameId, result.getGameId());
+    }
+
+    @Test
+    @DisplayName("Should handle exception in handleGameMessage")
+    void shouldHandleExceptionInHandleGameMessage() {
+        // Given
+        GameMessage message = new GameMessage();
+        message.setPlayerId("player1");
+        String gameId = "game123";
+        
+        when(gameService.isPlayerInGame(gameId, "player1")).thenThrow(new RuntimeException("Error"));
+
+        // When
+        GameMessage result = controller.handleGameMessage(gameId, message, principal);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(MessageType.ERROR, result.getType());
+    }
 }
 

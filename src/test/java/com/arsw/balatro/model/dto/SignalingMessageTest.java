@@ -85,6 +85,98 @@ class SignalingMessageTest {
             assertEquals(type, message.getType());
         }
     }
+
+    @Test
+    @DisplayName("Should create SignalingMessage with AllArgsConstructor")
+    void shouldCreateSignalingMessageWithAllArgsConstructor() {
+        // When
+        SignalingMessage message = new SignalingMessage(
+            "OFFER", "game123", "player1", "player2", "sdp", "2024-01-01T00:00:00Z"
+        );
+
+        // Then
+        assertNotNull(message);
+        assertEquals("OFFER", message.getType());
+        assertEquals("game123", message.getGameId());
+        assertEquals("player1", message.getSenderId());
+        assertEquals("player2", message.getTargetId());
+        assertEquals("sdp", message.getPayload());
+        assertEquals("2024-01-01T00:00:00Z", message.getTimestamp());
+    }
+
+    @Test
+    @DisplayName("Should implement equals correctly")
+    void shouldImplementEqualsCorrectly() {
+        // Given
+        SignalingMessage msg1 = SignalingMessage.builder()
+            .type("OFFER")
+            .gameId("game123")
+            .senderId("player1")
+            .targetId("player2")
+            .build();
+        
+        SignalingMessage msg2 = SignalingMessage.builder()
+            .type("OFFER")
+            .gameId("game123")
+            .senderId("player1")
+            .targetId("player2")
+            .build();
+        
+        SignalingMessage msg3 = SignalingMessage.builder()
+            .type("ANSWER")
+            .gameId("game456")
+            .senderId("player3")
+            .targetId("player4")
+            .build();
+
+        // Then
+        assertEquals(msg1, msg2);
+        assertNotEquals(msg1, msg3);
+        assertNotEquals(msg1, null);
+        assertNotEquals(msg1, "not a message");
+    }
+
+    @Test
+    @DisplayName("Should implement hashCode correctly")
+    void shouldImplementHashCodeCorrectly() {
+        // Given
+        SignalingMessage msg1 = SignalingMessage.builder()
+            .type("OFFER")
+            .gameId("game123")
+            .senderId("player1")
+            .targetId("player2")
+            .build();
+        
+        SignalingMessage msg2 = SignalingMessage.builder()
+            .type("OFFER")
+            .gameId("game123")
+            .senderId("player1")
+            .targetId("player2")
+            .build();
+
+        // Then
+        assertEquals(msg1.hashCode(), msg2.hashCode());
+    }
+
+    @Test
+    @DisplayName("Should implement toString")
+    void shouldImplementToString() {
+        // Given
+        SignalingMessage message = SignalingMessage.builder()
+            .type("OFFER")
+            .gameId("game123")
+            .senderId("player1")
+            .targetId("player2")
+            .build();
+
+        // When
+        String toString = message.toString();
+
+        // Then
+        assertNotNull(toString);
+        assertTrue(toString.contains("OFFER"));
+        assertTrue(toString.contains("game123"));
+    }
 }
 
 

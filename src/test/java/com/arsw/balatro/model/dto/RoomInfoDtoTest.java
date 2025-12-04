@@ -99,6 +99,115 @@ class RoomInfoDtoTest {
         assertEquals(9876543210L, roomInfo.getCreatedAt());
         assertEquals(RoomInfoDto.RoomStatus.WAITING, roomInfo.getStatus());
     }
+
+    @Test
+    @DisplayName("Should create RoomInfoDto with AllArgsConstructor")
+    void shouldCreateRoomInfoDtoWithAllArgsConstructor() {
+        // When
+        RoomInfoDto roomInfo = new RoomInfoDto(
+            "ABC123", "game123", "player1", "Host Player", 
+            "player2", "Guest Player", true, 1234567890L, 
+            RoomInfoDto.RoomStatus.IN_PROGRESS
+        );
+
+        // Then
+        assertNotNull(roomInfo);
+        assertEquals("ABC123", roomInfo.getRoomCode());
+        assertEquals("game123", roomInfo.getGameId());
+        assertEquals("player1", roomInfo.getHostId());
+        assertEquals("Host Player", roomInfo.getHostName());
+        assertEquals("player2", roomInfo.getGuestId());
+        assertEquals("Guest Player", roomInfo.getGuestName());
+        assertTrue(roomInfo.isFull());
+        assertEquals(1234567890L, roomInfo.getCreatedAt());
+        assertEquals(RoomInfoDto.RoomStatus.IN_PROGRESS, roomInfo.getStatus());
+    }
+
+    @Test
+    @DisplayName("Should implement equals correctly")
+    void shouldImplementEqualsCorrectly() {
+        // Given
+        RoomInfoDto room1 = RoomInfoDto.builder()
+            .roomCode("ABC123")
+            .gameId("game123")
+            .hostId("player1")
+            .guestId("player2")
+            .isFull(true)
+            .status(RoomInfoDto.RoomStatus.IN_PROGRESS)
+            .build();
+        
+        RoomInfoDto room2 = RoomInfoDto.builder()
+            .roomCode("ABC123")
+            .gameId("game123")
+            .hostId("player1")
+            .guestId("player2")
+            .isFull(true)
+            .status(RoomInfoDto.RoomStatus.IN_PROGRESS)
+            .build();
+        
+        RoomInfoDto room3 = RoomInfoDto.builder()
+            .roomCode("XYZ789")
+            .gameId("game456")
+            .hostId("player3")
+            .guestId("player4")
+            .isFull(false)
+            .status(RoomInfoDto.RoomStatus.WAITING)
+            .build();
+
+        // Then
+        assertEquals(room1, room2);
+        assertNotEquals(room1, room3);
+        assertNotEquals(room1, null);
+        assertNotEquals(room1, "not a room");
+    }
+
+    @Test
+    @DisplayName("Should implement hashCode correctly")
+    void shouldImplementHashCodeCorrectly() {
+        // Given
+        RoomInfoDto room1 = RoomInfoDto.builder()
+            .roomCode("ABC123")
+            .gameId("game123")
+            .hostId("player1")
+            .guestId("player2")
+            .isFull(true)
+            .status(RoomInfoDto.RoomStatus.IN_PROGRESS)
+            .build();
+        
+        RoomInfoDto room2 = RoomInfoDto.builder()
+            .roomCode("ABC123")
+            .gameId("game123")
+            .hostId("player1")
+            .guestId("player2")
+            .isFull(true)
+            .status(RoomInfoDto.RoomStatus.IN_PROGRESS)
+            .build();
+
+        // Then
+        assertEquals(room1.hashCode(), room2.hashCode());
+    }
+
+    @Test
+    @DisplayName("Should implement toString")
+    void shouldImplementToString() {
+        // Given
+        RoomInfoDto roomInfo = RoomInfoDto.builder()
+            .roomCode("ABC123")
+            .gameId("game123")
+            .hostId("player1")
+            .guestId("player2")
+            .isFull(true)
+            .status(RoomInfoDto.RoomStatus.IN_PROGRESS)
+            .build();
+
+        // When
+        String toString = roomInfo.toString();
+
+        // Then
+        assertNotNull(toString);
+        assertTrue(toString.contains("ABC123"));
+        assertTrue(toString.contains("game123"));
+    }
 }
 
 

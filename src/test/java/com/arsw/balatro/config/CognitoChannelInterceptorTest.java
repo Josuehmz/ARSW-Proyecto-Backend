@@ -144,5 +144,59 @@ class CognitoChannelInterceptorTest {
         assertEquals(principal, resultAccessor.getUser());
         assertEquals("player1", resultAccessor.getUser().getName());
     }
+
+    @Test
+    void testPreSend_WhenConnectCommandWithGeneralException_ShouldThrowMessageDeliveryException() {
+        // Given
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setSessionId("session123");
+        Message<?> message = MessageBuilder.createMessage("test", accessor.getMessageHeaders());
+        MessageChannel channel = mock(MessageChannel.class);
+        
+        when(handshakeInterceptor.validateAndExtractPrincipal(any(StompHeaderAccessor.class)))
+            .thenThrow(new RuntimeException("Unexpected error"));
+
+        // When & Then
+        assertThrows(MessageDeliveryException.class, () -> {
+            interceptor.preSend(message, channel);
+        });
+    }
+
+    @Test
+    void testPreSend_WhenNonConnectCommandWithPrincipal_ShouldReturnMessage() {
+        // Given
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SEND);
+        accessor.setSessionId("session123");
+        accessor.setUser(() -> "player1");
+        Message<?> message = MessageBuilder.withPayload("test")
+            .setHeaders(accessor)
+            .build();
+        MessageChannel channel = mock(MessageChannel.class);
+
+        // When
+        Message<?> result = interceptor.preSend(message, channel);
+
+        // Then
+        assertNotNull(result);
+        verify(handshakeInterceptor, never()).validateAndExtractPrincipal(any());
+    }
+
+    @Test
+    void testPreSend_WhenNonConnectCommandWithoutPrincipal_ShouldReturnMessage() {
+        // Given
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        accessor.setSessionId("session123");
+        Message<?> message = MessageBuilder.withPayload("test")
+            .setHeaders(accessor)
+            .build();
+        MessageChannel channel = mock(MessageChannel.class);
+
+        // When
+        Message<?> result = interceptor.preSend(message, channel);
+
+        // Then
+        assertNotNull(result);
+        verify(handshakeInterceptor, never()).validateAndExtractPrincipal(any());
+    }
 }
 

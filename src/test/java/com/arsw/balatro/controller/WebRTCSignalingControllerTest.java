@@ -253,5 +253,176 @@ class WebRTCSignalingControllerTest {
         // Then
         verify(sessionService).registerSession("player1", "session1");
     }
+
+    @Test
+    @DisplayName("Should not handle signal with empty Principal username")
+    void shouldNotHandleSignalWithEmptyPrincipalUsername() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("OFFER");
+        message.setGameId("game123");
+        message.setTargetId("player2");
+        
+        when(principal.getName()).thenReturn("");
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        verify(messagingTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Should not handle signal with whitespace-only Principal username")
+    void shouldNotHandleSignalWithWhitespaceOnlyPrincipalUsername() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("OFFER");
+        message.setGameId("game123");
+        message.setTargetId("player2");
+        
+        when(principal.getName()).thenReturn("   ");
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        verify(messagingTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Should not handle signal with empty targetId")
+    void shouldNotHandleSignalWithEmptyTargetId() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("OFFER");
+        message.setGameId("game123");
+        message.setTargetId("   "); // Whitespace only
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        verify(messagingTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Should not handle signal with empty gameId")
+    void shouldNotHandleSignalWithEmptyGameId() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("OFFER");
+        message.setGameId("   "); // Whitespace only
+        message.setTargetId("player2");
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        verify(messagingTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Should not handle signal with empty type")
+    void shouldNotHandleSignalWithEmptyType() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("   "); // Whitespace only
+        message.setGameId("game123");
+        message.setTargetId("player2");
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        verify(messagingTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Should handle ANSWER signal successfully")
+    void shouldHandleAnswerSignalSuccessfully() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("ANSWER");
+        message.setGameId("game123");
+        message.setTargetId("player2");
+        
+        when(sessionService.getSessionId("player2")).thenReturn("session2");
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        verify(messagingTemplate).convertAndSendToUser(
+            eq("player2"),
+            eq("/queue/webrtc/game123"),
+            any()
+        );
+    }
+
+    @Test
+    @DisplayName("Should handle exception when processing signal")
+    void shouldHandleExceptionWhenProcessingSignal() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("OFFER");
+        message.setGameId("game123");
+        message.setTargetId("player2");
+        
+        when(sessionService.getSessionId("player2")).thenThrow(new RuntimeException("Service error"));
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        // Should not throw exception, just log error
+        verify(sessionService).getSessionId("player2");
+    }
+
+    @Test
+    @DisplayName("Should find session with original targetId when normalized not found")
+    void shouldFindSessionWithOriginalTargetIdWhenNormalizedNotFound() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("OFFER");
+        message.setGameId("game123");
+        message.setTargetId("Player2"); // With capital P
+        
+        when(sessionService.getSessionId("player2")).thenReturn(null); // Normalized not found
+        when(sessionService.getSessionId("Player2")).thenReturn("session2"); // Original found
+
+        // When
+        controller.handleSignaling(message, principal, headerAccessor);
+
+        // Then
+        verify(messagingTemplate).convertAndSendToUser(
+            eq("player2"), // Still uses normalized for sending
+            eq("/queue/webrtc/game123"),
+            any()
+        );
+    }
+
+    @Test
+    @DisplayName("Should handle signal with null headerAccessor")
+    void shouldHandleSignalWithNullHeaderAccessor() {
+        // Given
+        SignalingMessage message = new SignalingMessage();
+        message.setType("OFFER");
+        message.setGameId("game123");
+        message.setTargetId("player2");
+        
+        when(sessionService.getSessionId("player2")).thenReturn("session2");
+
+        // When
+        controller.handleSignaling(message, principal, null);
+
+        // Then
+        verify(sessionService, never()).registerSession(anyString(), anyString());
+        verify(messagingTemplate).convertAndSendToUser(
+            eq("player2"),
+            eq("/queue/webrtc/game123"),
+            any()
+        );
+    }
 }
 
