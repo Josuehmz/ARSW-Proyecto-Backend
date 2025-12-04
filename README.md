@@ -834,6 +834,41 @@ Aunque el backend actual es ultra-ligero, se podrían agregar:
 - ❌ Procesamiento de lógica de juego (debe estar en el cliente)
 - ❌ Almacenamiento de estado detallado del juego (solo en cliente)
 
+---
+
+## Despliegue
+
+Nuestro despliegue está realizado en AWS
+
+![instancias](/img/instancias.png)
+
+![targetGroupsALB](/img/targetGroupALB.png)
+
+![alb](/img/alb.png)
+
+![albHealthCheck](/img/alb-healthCheck.png)
+
+### Impedimentos
+
+Al estar usando una cuenta  de aws instructure, una cuenta de aprendizaje; no nos es posible hacer el CI/CD correctamente, ya que cada vez que abrimos el laboratorio se crean credenciales nuevas, y toca actualizar las variable de etorno usadas en el proceso de despliegue del proyecto.
+
+### Pruebas de carga
+
+```sh
+load-tests/
+├── pom.xml                          # Configuración Maven con Gatling
+├── README.md                        # Documentación completa
+├── run-all-tests.ps1               # Script para ejecutar todas las pruebas
+└── src/test/
+    ├── scala/simulations/
+    │   ├── BasicLoadTest.scala     # Prueba básica (50 usuarios)
+    │   ├── StressTest.scala        # Prueba de estrés (300 usuarios pico)
+    │   └── LoadBalancerTest.scala  # Prueba de balanceo
+    └── resources/
+        └── gatling.conf            # Configuración de Gatling
+```
+
+
 ## 📝 Conclusión
 
 Este backend implementa un **sistema ultra-ligero y eficiente** como **intermediario puro** de comunicación en tiempo real.

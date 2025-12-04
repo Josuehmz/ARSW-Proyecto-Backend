@@ -16,8 +16,8 @@ import java.util.List;
 @Configuration
 public class CorsConfig {
 
-    @Value("${cors.allowed-origins}")
-    private String[] allowedOrigins;
+    @Value("${cors.allowed-origin-patterns}")
+    private String[] allowedOriginPatterns;
 
     @Value("${cors.allowed-methods}")
     private String[] allowedMethods;
@@ -31,7 +31,8 @@ public class CorsConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList(allowedOrigins));
+        // Usar allowedOriginPatterns en lugar de allowedOrigins cuando allowCredentials=true
+        configuration.setAllowedOriginPatterns(Arrays.asList(allowedOriginPatterns));
         configuration.setAllowedMethods(Arrays.asList(allowedMethods));
         configuration.setAllowedHeaders(List.of(allowedHeaders));
         configuration.setAllowCredentials(allowCredentials);
