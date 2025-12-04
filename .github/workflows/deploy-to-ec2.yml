@@ -71,11 +71,17 @@ jobs:
 
       - name: Deploy to EC2 Host 1
         uses: appleboy/ssh-action@v0.1.7
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
         with:
           host: ${{ secrets.EC2_HOST_1 }}
           username: ${{ secrets.EC2_SSH_USER }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: 22
+          envs: AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,AWS_SESSION_TOKEN,AWS_DEFAULT_REGION
           script: |
             set -e
             mkdir -p /home/${{ secrets.EC2_SSH_USER }}/backend
@@ -83,7 +89,6 @@ jobs:
             
             # Create or update docker-compose.yml
             cat > docker-compose.yml <<'EOFCOMPOSE'
-            version: "3.8"
             services:
               backend:
                 image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
@@ -115,21 +120,32 @@ jobs:
                     max-file: "3"
             EOFCOMPOSE
             
-            # Authenticate to ECR
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com || true
+            # Authenticate to ECR with passed credentials
+            export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+            export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+            export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN}"
+            export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION}"
+            
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
             
             # Pull and restart
-            docker-compose pull || true
+            docker-compose pull
             docker-compose up -d --remove-orphans
             docker ps -a
 
       - name: Deploy to EC2 Host 2
         uses: appleboy/ssh-action@v0.1.7
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
         with:
           host: ${{ secrets.EC2_HOST_2 }}
           username: ${{ secrets.EC2_SSH_USER }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: 22
+          envs: AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,AWS_SESSION_TOKEN,AWS_DEFAULT_REGION
           script: |
             set -e
             mkdir -p /home/${{ secrets.EC2_SSH_USER }}/backend
@@ -137,7 +153,6 @@ jobs:
             
             # Create or update docker-compose.yml
             cat > docker-compose.yml <<'EOFCOMPOSE'
-            version: "3.8"
             services:
               backend:
                 image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
@@ -169,10 +184,15 @@ jobs:
                     max-file: "3"
             EOFCOMPOSE
             
-            # Authenticate to ECR
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com || true
+            # Authenticate to ECR with passed credentials
+            export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+            export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+            export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN}"
+            export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION}"
+            
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
             
             # Pull and restart
-            docker-compose pull || true
+            docker-compose pull
             docker-compose up -d --remove-orphans
             docker ps -a
