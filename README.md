@@ -1,467 +1,207 @@
 # Backend Balatro Multiplayer
 
-## 📋 Descripción
+Backend para el juego multijugador Balatro, implementado con Spring Boot y WebSocket. Actúa como **intermediario de comunicación en tiempo real** entre jugadores, con lógica de progreso y detección de victoria.
 
-Backend para el juego multijugador Balatro, implementado con Spring Boot y WebSocket. Este servidor actúa como **intermediario de comunicación en tiempo real** entre jugadores, sin procesar lógica de juego. Toda la lógica de negocio, reglas del juego y persistencia se manejan en el cliente.
+## 🎯 Funcionalidades Principales
 
-### Arquitectura
+### Comunicación en Tiempo Real
+- **WebSocket con STOMP**: Comunicación bidireccional entre jugadores
+- **Reenvío de mensajes**: Todos los mensajes se reenvían automáticamente a ambos jugadores
+- **Señalización WebRTC**: Soporte para chat de voz entre jugadores
 
-Este backend implementa una **arquitectura de clientes gruesos** donde:
-- El servidor **empareja jugadores** (matchmaking automático o salas privadas)
-- El servidor **reenvía mensajes** entre jugadores sin procesarlos
-- Los clientes manejan **toda** la lógica de negocio, reglas del juego y persistencia
-- El backend **no conoce ni valida** las reglas del juego
-- El backend mantiene un **registro mínimo** de partidas activas (gameId y jugadores)
+### Emparejamiento
+- **Matchmaking automático**: Cola FIFO que empareja jugadores automáticamente
+- **Salas privadas**: Creación de salas con código único (6 caracteres) para jugar con amigos
 
-## 🏗️ Arquitectura del Sistema
+### Lógica de Progreso y Victoria ⭐
+- **Seguimiento de progreso**: El backend mantiene el progreso de cada jugador (ante y blind)
+- **Detección de victoria automática**: 
+  - Detecta cuando un jugador supera al oponente que se quedó sin manos
+  - Envía `GAME_WON` y `GAME_LOST` automáticamente
+- **Manejo de empates**: Detecta cuando ambos jugadores se quedan sin manos en el mismo ante/blind
+- **Comparación de progresos**: Compara ante y blind para determinar quién está más adelante
+- **Timeout**: Maneja cuando un jugador se queda sin tiempo (15 segundos)
+
+### Autenticación
+- **AWS Cognito**: Autenticación JWT integrada
+- **Validación de tokens**: Verificación automática en cada conexión WebSocket
+
+## 🏗️ Arquitectura
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                   Cliente 1                                │
-│  (Lógica de juego + Estado + Base de datos local)         │
-└────────────────────────┬───────────────────────────────────┘
-                         │ WebSocket (STOMP) + JWT Cognito
-                         │
-┌────────────────────────▼───────────────────────────────────┐
-│              Backend (Spring Boot)                         │
-│  ┌──────────────────────────────────────────────────┐    │
-│  │      WebSocketConfig (STOMP/SockJS)              │    │
-│  │      Cognito Authentication                       │    │
-│  └──────────────────────────────────────────────────┘    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐       │
-│  │ Matchmaking  │  │ Room Service │  │ Game     │       │
-│  │   Service    │  │ (Salas)      │  │ Service  │       │
-│  └──────────────┘  └──────────────┘  └──────────┘       │
-│  ┌──────────────┐  ┌──────────────┐                      │
-│  │ Session      │  │ WebRTC       │                      │
-│  │ Service      │  │ Signaling    │                      │
-│  └──────────────┘  └──────────────┘                      │
-│                                                            │
-│  Funciones:                                               │
-│  ✓ Autenticación con AWS Cognito (JWT)                   │
-│  ✓ Emparejar jugadores (FIFO o salas privadas)          │
-│  ✓ Reenviar mensajes entre jugadores                     │
-│  ✓ Señalización WebRTC para chat de voz                  │
-│  ✓ Notificar desconexiones                               │
-│  ✗ NO procesa lógica de juego                            │
-│  ✗ NO valida acciones                                    │
-│  ✗ NO conoce reglas del juego                            │
-└────────────────────────┬───────────────────────────────────┘
-                         │ WebSocket (STOMP)
-                         │
-┌────────────────────────▼───────────────────────────────────┐
-│                   Cliente 2                                │
-│  (Lógica de juego + Estado + Base de datos local)         │
-└────────────────────────────────────────────────────────────┘
+Cliente 1 ←→ [Backend Spring Boot] ←→ Cliente 2
+              ├─ Matchmaking
+              ├─ Room Service
+              ├─ Game Service (progreso + victoria)
+              ├─ WebRTC Signaling
+              └─ Session Management
 ```
 
-## 🔧 Componentes Principales
+## 📡 Endpoints WebSocket
 
-### Configuración
+### Matchmaking
+- `/app/matchmaking/join` - Unirse a cola
+- `/app/matchmaking/leave` - Salir de cola
+- Suscripción: `/user/queue/matchmaking`
 
-- **WebSocketConfig**: Configura STOMP sobre WebSocket con broker en memoria
-  - `/topic/*`: Broadcast a todos los suscriptores
-  - `/queue/*`: Mensajes privados a un jugador específico
-  - Endpoint `/ws` con soporte SockJS
+### Salas Privadas
+- `/app/room/create` - Crear sala
+- `/app/room/join` - Unirse a sala con código
+- Suscripción: `/user/queue/room`
 
-- **CognitoWebSocketConfig**: Integración con AWS Cognito para autenticación JWT
-  - Validación de tokens en el handshake WebSocket
-  - Extracción del username de Cognito como playerId
+### Mensajes de Juego
+- `/app/game/{gameId}` o `/app/game/{gameId}/message` - Enviar mensaje
+- `/app/game/{gameId}/chat` - Enviar chat
+- `/app/game/{gameId}/emote` - Enviar emote
+- Suscripción: `/topic/game/{gameId}`
 
-- **SecurityConfig**: Configuración de Spring Security
-  - Filtro de autenticación Cognito para peticiones HTTP
-  - CORS configurado para desarrollo local
+### WebRTC
+- `/app/webrtc/signal` - Señalización WebRTC
+- Suscripción: `/user/queue/webrtc/{gameId}`
 
-- **CorsConfig**: Permite conexiones desde localhost:3000, localhost:5173, etc.
+## 🔄 Tipos de Mensajes Importantes
 
-### Controladores
+### ROUND_COMPLETE
+Cuando un jugador completa una ronda, el backend:
+1. Actualiza el progreso del jugador (ante, blind)
+2. Verifica condiciones de victoria
+3. Si hay victoria, envía `GAME_WON` y `GAME_LOST` automáticamente
+4. Reenvía el mensaje a ambos jugadores
 
-- **GameWebSocketController**: Endpoints WebSocket para el juego
-  - `/app/matchmaking/join` - Unirse a cola de matchmaking
-  - `/app/matchmaking/leave` - Salir de cola
-  - `/app/room/create` - Crear sala privada
-  - `/app/room/join` - Unirse a sala con código
-  - `/app/game/{gameId}/message` - Enviar mensaje genérico al oponente
-  - `/app/game/{gameId}/chat` - Enviar mensaje de chat
-  - `/app/game/{gameId}/emote` - Enviar emote
-  - `/app/ping` - Keep-alive
-
-- **WebRTCSignalingController**: Señalización WebRTC para chat de voz
-  - `/app/webrtc/signal` - Maneja OFFER, ANSWER, ICE_CANDIDATE
-
-### Servicios
-
-- **MatchmakingService**: Sistema de emparejamiento automático FIFO
-  - Cola thread-safe de jugadores esperando partida
-  - Emparejamiento automático cuando hay 2+ jugadores
-  - Notificación a ambos jugadores cuando se encuentra match
-
-- **RoomService**: Gestión de salas privadas
-  - Creación de salas con código único (6 caracteres)
-  - Unión a salas mediante código
-  - Máximo 2 jugadores por sala
-  - Limpieza automática cuando se abandona
-
-- **GameService**: Registro minimalista de partidas
-  - Mantiene solo: gameId, player1Id, player2Id, timestamps
-  - Validación de pertenencia a partida para envío de mensajes
-  - Limpieza automática de partidas inactivas
-
-- **SessionService**: Gestión de sesiones WebSocket
-  - Mapeo playerId ↔ sessionId
-  - Registro de sesiones activas
-  - Limpieza al desconectar
-
-- **CognitoTokenValidationService**: Validación de tokens JWT de AWS Cognito
-  - Validación de firma usando JWK
-  - Extracción de claims (username, sub, etc.)
-
-### Eventos
-
-- **WebSocketEventListener**: Manejo de conexiones/desconexiones
-  - Registro de nuevas conexiones
-  - Limpieza de recursos al desconectar
-  - Notificación al oponente sobre desconexiones
-
-## 🔐 Autenticación
-
-El backend requiere autenticación con **AWS Cognito** usando tokens JWT.
-
-### Conexión WebSocket con Cognito
-
-```javascript
-import { fetchAuthSession } from 'aws-amplify/auth';
-import { Client } from '@stomp/stompjs';
-import SockJS from 'sockjs-client';
-
-async function connectWebSocket() {
-    // Obtener token de Cognito
-    const session = await fetchAuthSession();
-    const token = session.tokens?.accessToken?.toString();
-    
-    if (!token) {
-        throw new Error('No se encontró token de autenticación');
+**Formato:**
+```json
+{
+  "type": "ROUND_COMPLETE",
+  "gameId": "...",
+  "playerId": "...",
+  "payload": {
+    "action": "ROUND_COMPLETE",
+    "data": {
+      "ante": 2,
+      "blind": "small",
+      "score": 500
     }
-    
-    const client = new Client({
-        webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
-        connectHeaders: {
-            'Authorization': `Bearer ${token}`
-        },
-        onConnect: (frame) => {
-            console.log('✅ Conectado al servidor');
-            
-            // Suscribirse a notificaciones
-            client.subscribe('/user/queue/matchmaking', (message) => {
-                const data = JSON.parse(message.body);
-                // Manejar mensaje
-            });
-        },
-        onStompError: (frame) => {
-            console.error('❌ Error STOMP:', frame);
-        }
-    });
-    
-    client.activate();
-    return client;
+  }
 }
 ```
 
-**Importante:** El token debe enviarse en el header `Authorization` del mensaje STOMP CONNECT.
+### GAME_LOST (no_hands)
+Cuando un jugador se queda sin manos:
+1. El backend registra el ante/blind donde se quedó sin manos
+2. Verifica si el oponente ya está más adelante (victoria inmediata)
+3. Si no, espera a que el oponente avance para verificar victoria
+4. Reenvía el mensaje a ambos jugadores
 
-## 📦 Estructura del Proyecto
-
-```
-ARSW-Proyecto-Backend/
-│
-├── src/main/java/com/arsw/balatro/
-│   ├── BalatroBackendApplication.java    # Clase principal
-│   │
-│   ├── config/                            # Configuraciones
-│   │   ├── WebSocketConfig.java          # Config WebSocket/STOMP
-│   │   ├── CognitoWebSocketConfig.java   # Config Cognito para WebSocket
-│   │   ├── SecurityConfig.java           # Config Spring Security
-│   │   ├── CorsConfig.java                # Config CORS
-│   │   └── ...
-│   │
-│   ├── controller/                        # Controladores WebSocket
-│   │   ├── GameWebSocketController.java  # Endpoints del juego
-│   │   └── WebRTCSignalingController.java # Señalización WebRTC
-│   │
-│   ├── service/                           # Servicios
-│   │   ├── MatchmakingService.java       # Sistema de emparejamiento
-│   │   ├── RoomService.java              # Gestión de salas privadas
-│   │   ├── GameService.java              # Registro de partidas
-│   │   ├── SessionService.java           # Gestión de sesiones
-│   │   └── CognitoTokenValidationService.java # Validación JWT
-│   │
-│   ├── websocket/                         # Eventos WebSocket
-│   │   └── WebSocketEventListener.java   # Listener conexión/desconexión
-│   │
-│   ├── security/                         # Seguridad
-│   │   └── CognitoAuthenticationFilter.java # Filtro de autenticación
-│   │
-│   └── model/                             # Modelos de datos
-│       ├── dto/                           # Data Transfer Objects
-│       │   ├── GameMessage.java          # Mensaje genérico universal
-│       │   ├── GameState.java            # Estado mínimo (solo IDs)
-│       │   ├── MatchFoundDto.java        # Datos de match encontrado
-│       │   ├── RoomInfoDto.java         # Información de sala
-│       │   ├── SignalingMessage.java    # Mensaje WebRTC
-│       │   └── ...
-│       └── enums/
-│           └── MessageType.java          # Tipos de mensaje
-│
-├── src/main/resources/
-│   └── application.properties             # Configuración de la app
-│
-├── pom.xml                                # Dependencias Maven
-└── README.md                              # Este archivo
+**Formato:**
+```json
+{
+  "type": "GAME_LOST",
+  "gameId": "...",
+  "playerId": "...",
+  "payload": {
+    "action": "GAME_LOST",
+    "data": {
+      "reason": "no_hands",
+      "ante": 1,
+      "blind": "big"
+    }
+  }
+}
 ```
 
-## 🚀 Instalación y Uso
+### GAME_WON / GAME_LOST
+El backend envía estos mensajes automáticamente cuando detecta victoria:
+- `GAME_WON` al ganador con `reason: "opponent_no_hands"` o `"opponent_timeout"`
+- `GAME_LOST` al perdedor con `reason: "no_hands"` o `"timeout"`
+
+### TIME_OUT
+Cuando un jugador se queda sin tiempo (cronómetro de 15s):
+- El backend reenvía el mensaje a ambos jugadores
+- El oponente recibe la notificación de victoria
+
+### Empate
+Cuando ambos jugadores se quedan sin manos en el mismo ante/blind:
+- El backend detecta el empate automáticamente
+- Envía `GAME_LOST` con `reason: "tie"` a ambos jugadores
+
+## 🚀 Instalación Rápida
 
 ### Requisitos
-
-- Java 17 o superior
+- Java 17+
 - Maven 3.8+
-- AWS Cognito configurado (para autenticación)
+- AWS Cognito configurado
 
-### Pasos de Instalación
+### Pasos
 
-1. **Clonar el repositorio**
+1. **Clonar y configurar**
 ```bash
 git clone <repo-url>
 cd ARSW-Proyecto-Backend
 ```
 
-2. **Configurar AWS Cognito**
-
-Editar `src/main/resources/application.properties`:
+2. **Configurar AWS Cognito** en `src/main/resources/application.properties`:
 ```properties
-# AWS Cognito
 aws.cognito.userPoolId=tu-user-pool-id
 aws.cognito.region=us-east-1
 aws.cognito.jwkUrl=https://cognito-idp.{region}.amazonaws.com/{userPoolId}/.well-known/jwks.json
 ```
 
-3. **Compilar el proyecto**
-```bash
-mvn clean install
-```
-
-4. **Ejecutar el servidor**
+3. **Ejecutar**
 ```bash
 mvn spring-boot:run
 ```
 
-El servidor estará disponible en `http://localhost:8080` y el endpoint WebSocket en `ws://localhost:8080/ws`.
+Servidor disponible en `http://localhost:8080`, WebSocket en `ws://localhost:8080/ws`
 
-### Verificar que Funciona
+## 🔐 Autenticación
 
-**Endpoint de salud:**
-```bash
-curl http://localhost:8080/actuator/health
-```
-
-**Logs esperados:**
-```
-╔════════════════════════════════════════════════════════════╗
-║   🃏  Balatro Multiplayer Backend - STARTED  🃏           ║
-║                                                            ║
-║   Server: http://localhost:8080                            ║
-║   WebSocket: ws://localhost:8080/ws                        ║
-║   Health: http://localhost:8080/actuator/health            ║
-║                                                            ║
-║   Ready for connections! 🚀                                ║
-╚════════════════════════════════════════════════════════════╝
-```
-
-### Configuración
-
-**Archivo:** `src/main/resources/application.properties`
-
-```properties
-# Puerto del servidor
-server.port=8080
-
-# AWS Cognito
-aws.cognito.userPoolId=tu-user-pool-id
-aws.cognito.region=us-east-1
-aws.cognito.jwkUrl=https://cognito-idp.{region}.amazonaws.com/{userPoolId}/.well-known/jwks.json
-
-# Orígenes permitidos para WebSocket y CORS
-spring.websocket.servlet.allowed-origins=http://localhost:3000,http://localhost:5173
-cors.allowed-origins=http://localhost:3000,http://localhost:5173
-
-# Tamaño máximo de mensajes WebSocket (64KB)
-spring.websocket.message-size-limit=65536
-
-# Nivel de logging
-logging.level.com.arsw.balatro=INFO
-```
-
-## 🔄 Flujo de Comunicación
-
-### 1. Matchmaking Automático
+El backend requiere token JWT de AWS Cognito en el header `Authorization` del mensaje STOMP CONNECT:
 
 ```javascript
-// Cliente A y B envían
-stompClient.send("/app/matchmaking/join", {}, JSON.stringify({
-    type: "JOIN_QUEUE",
-    playerId: "player-uuid"
-}));
-
-// Servidor responde a ambos cuando hay match
-// Suscripción: /user/queue/matchmaking
-{
-    type: "MATCH_FOUND",
-    gameId: "game-uuid",
-    payload: {
-        player1Id: "...",
-        player2Id: "...",
-        startTime: 1234567890
+const client = new Client({
+    webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+    connectHeaders: {
+        'Authorization': `Bearer ${token}` // Token de Cognito
     }
-}
-```
-
-### 2. Salas Privadas
-
-```javascript
-// Crear sala
-stompClient.send("/app/room/create", {}, JSON.stringify({
-    type: "CREATE_ROOM",
-    playerId: "player-uuid"
-}));
-
-// Unirse a sala
-stompClient.send("/app/room/join", {}, JSON.stringify({
-    type: "JOIN_ROOM",
-    playerId: "player-uuid",
-    payload: {
-        roomCode: "ABC123"
-    }
-}));
-```
-
-### 3. Envío de Mensajes
-
-```javascript
-// Suscribirse al juego
-stompClient.subscribe(`/topic/game/${gameId}`, function(message) {
-    const data = JSON.parse(message.body);
-    // El cliente interpreta el mensaje según el tipo
-    handleGameMessage(data);
 });
-
-// Enviar mensaje genérico al oponente
-stompClient.send(`/app/game/${gameId}/message`, {}, JSON.stringify({
-    type: "GAME_MESSAGE",
-    playerId: "player-uuid",
-    gameId: gameId,
-    payload: {
-        // CUALQUIER ESTRUCTURA QUE EL CLIENTE NECESITE
-        action: "PLAY_HAND",
-        cards: ["card1", "card2"],
-        score: 500
-    }
-}));
-```
-
-**Importante:** El backend NO valida ni interpreta el `payload`. Solo verifica que el jugador pertenece al juego y reenvía el mensaje.
-
-### 4. WebRTC Signaling (Chat de Voz)
-
-```javascript
-// Suscribirse a señalización WebRTC
-stompClient.subscribe(`/user/queue/webrtc/${gameId}`, function(message) {
-    const signaling = JSON.parse(message.body);
-    // Manejar OFFER, ANSWER, ICE_CANDIDATE
-    handleWebRTCSignal(signaling);
-});
-
-// Enviar señalización
-stompClient.send("/app/webrtc/signal", {}, JSON.stringify({
-    type: "OFFER", // o "ANSWER", "ICE_CANDIDATE"
-    gameId: gameId,
-    targetId: "opponent-id",
-    payload: {
-        sdp: "...", // o candidate, etc.
-    }
-}));
 ```
 
 ## 🧪 Pruebas
 
-### Ejecutar Pruebas
-
 ```bash
+# Ejecutar pruebas
 mvn test
-```
 
-### Generar Reporte de Cobertura (JaCoCo)
-
-```bash
+# Generar reporte de cobertura
 mvn clean verify
+# Reporte en: target/site/jacoco/index.html
 ```
 
-El reporte HTML estará disponible en `target/site/jacoco/index.html`
+## 📊 Características Técnicas
 
-## 📊 Características
-
-**Lo que hace:**
-- ✅ Autenticación con AWS Cognito (JWT)
-- ✅ Matchmaking automático FIFO
-- ✅ Salas privadas con códigos
-- ✅ Reenvío de mensajes entre jugadores
-- ✅ Señalización WebRTC para chat de voz
 - ✅ Thread-safe para múltiples conexiones simultáneas
-- ✅ Manejo de desconexiones
-- ✅ Sin dependencias de base de datos (ultra-ligero)
+- ✅ Sin base de datos (todo en memoria)
+- ✅ Limpieza automática de partidas inactivas
+- ✅ Manejo robusto de desconexiones
+- ✅ Logging detallado para diagnóstico
 
-**Lo que NO hace:**
-- ❌ Procesar lógica de juego
-- ❌ Validar acciones de jugadores
-- ❌ Mantener estado detallado del juego
-- ❌ Declarar ganadores
-- ❌ Calcular puntajes
-- ❌ Manejar turnos
+## 💡 Lógica de Progreso y Victoria
 
-## 💡 Decisiones de Diseño
+El backend mantiene estado mínimo pero crítico:
 
-### Arquitectura de Clientes Gruesos
+### Estado por Partida
+- Progreso actual de cada jugador (ante, blind)
+- Punto donde cada jugador se quedó sin manos (si aplica)
+- Estado del juego (terminado, empate, ganador)
 
-Este backend fue diseñado como **intermediario puro** de comunicación:
+### Comparación de Progresos
+- Compara ante primero, luego blind si el ante es igual
+- Orden de blinds: `small` < `big` < `boss`
 
-1. **Separación de responsabilidades:**
-   - Backend: Solo comunicación y matchmaking
-   - Cliente: TODA la lógica del juego, validaciones, estado
-
-2. **Escalabilidad:**
-   - El backend no procesa lógica compleja, solo reenvía mensajes
-   - Puede manejar miles de partidas simultáneas
-   - El cuello de botella está en el cliente, no en el servidor
-
-3. **Desarrollo desacoplado:**
-   - Frontend y backend pueden desarrollarse independientemente
-   - Cambios en reglas del juego no requieren deploy del backend
-
-### Sin Base de Datos
-
-- No hay nada que persistir: solo `gameId + player1Id + player2Id`
-- No hay cartas, puntajes, ni estado de juego
-- Las partidas son sesiones temporales de comunicación
-- Despliegue trivial (un solo JAR)
-
-**Limitación:** Si el servidor se reinicia, las partidas activas se pierden. Para producción, considerar Redis solo para el registro de partidas.
-
-### STOMP sobre WebSocket
-
-STOMP simplifica el desarrollo:
-- Routing automático: `/topic/game/{gameId}` enruta mensajes automáticamente
-- Suscripciones: Los clientes se suscriben y reciben solo mensajes relevantes
-- Broadcasts: Un mensaje a `/topic/game/{gameId}` llega a ambos jugadores
-- Compatibilidad: Librerías en todos los lenguajes
+### Detección de Victoria
+1. **Victoria inmediata**: Si el oponente ya está más adelante cuando un jugador se queda sin manos
+2. **Victoria por progreso**: Si un jugador supera el ante/blind donde el oponente se quedó sin manos
+3. **Empate**: Si ambos se quedan sin manos en el mismo ante/blind
 
 ---
 
