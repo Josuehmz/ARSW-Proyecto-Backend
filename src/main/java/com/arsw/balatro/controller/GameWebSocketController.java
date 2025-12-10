@@ -558,6 +558,18 @@ public class GameWebSocketController {
     /**
      * ⚠️ IMPORTANTE: Este método recibe mensajes de juego y hace BROADCAST
      * Ruta principal para mensajes de juego: /app/game/{gameId}
+     * 
+     * Este método maneja todos los tipos de mensajes de juego, incluyendo:
+     * - GAME_MESSAGE
+     * - ROUND_COMPLETE
+     * - TIME_OUT (cuando un jugador se queda sin tiempo)
+     * - GAME_WON (cuando un jugador gana, incluyendo por timeout del oponente)
+     * - GAME_LOST (cuando un jugador pierde)
+     * - GAME_OVER / VICTORY (cuando el juego termina)
+     * - Y cualquier otro tipo de mensaje de juego
+     * 
+     * IMPORTANTE: Todos los mensajes se reenvían a /topic/game/{gameId} para que
+     * ambos jugadores los reciban. Esto incluye GAME_WON y GAME_LOST.
      */
     @MessageMapping("/game/{gameId}")
     @SendTo("/topic/game/{gameId}")
@@ -570,32 +582,276 @@ public class GameWebSocketController {
             String playerId = extractPlayerId(message, principal);
             String sessionId = principal != null ? principal.getName() : null;
             
+            // Normalizar playerId para consistencia (GameService normaliza internamente, pero mejor hacerlo aquí también)
+            String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+            
+            log.info("=== HANDLE GAME MESSAGE ===");
+            log.info("GameId: {}", gameId);
+            log.info("PlayerId (original): {}", playerId);
+            log.info("PlayerId (normalized): {}", normalizedPlayerId);
+            log.info("Message type: {}", message.getType());
+            
             // Registrar/actualizar sesión cuando se envía un mensaje de juego
-            if (sessionId != null) {
-                sessionService.registerSession(playerId, sessionId);
+            if (sessionId != null && normalizedPlayerId != null) {
+                sessionService.registerSession(normalizedPlayerId, sessionId);
             }
             
-            message.setPlayerId(playerId);
+            message.setPlayerId(normalizedPlayerId);
             message.setGameId(gameId);
             
             // Verificar que el jugador pertenece al juego
-            if (!gameService.isPlayerInGame(gameId, playerId)) {
-                log.warn("Player {} attempted to send message to game {} but is not a participant", 
-                    playerId, gameId);
-                return GameMessage.error(gameId, playerId, "No perteneces a esta partida");
+            boolean isInGame = gameService.isPlayerInGame(gameId, normalizedPlayerId);
+            log.info("Player validation: isInGame={}, gameId={}, playerId={}", isInGame, gameId, normalizedPlayerId);
+            
+            if (!isInGame) {
+                // Log detallado para diagnóstico
+                try {
+                    com.arsw.balatro.model.dto.GameState gameState = gameService.getGameState(gameId);
+                    log.error("❌ Player {} (normalized: {}) NOT in game {}", normalizedPlayerId, normalizedPlayerId, gameId);
+                    log.error("💡 Game state: player1Id={}, player2Id={}", gameState.getPlayer1Id(), gameState.getPlayer2Id());
+                    log.error("💡 Comparison: player1Id.equals? {}, player2Id.equals? {}", 
+                        gameState.getPlayer1Id().equals(normalizedPlayerId),
+                        gameState.getPlayer2Id().equals(normalizedPlayerId));
+                    log.error("💡 Debug info:\n{}", gameService.getDebugInfo());
+                } catch (Exception e) {
+                    log.error("💡 Game {} not found or error getting game state: {}", gameId, e.getMessage());
+                    log.error("💡 Debug info:\n{}", gameService.getDebugInfo());
+                }
+                return GameMessage.error(gameId, normalizedPlayerId, "No perteneces a esta partida");
             }
             
-            log.info("📨 Mensaje de juego recibido: gameId={}, playerId={}, type={}", 
-                gameId, playerId, message.getType());
+            // Procesar mensajes según su tipo
+            if (message.getType() == MessageType.ROUND_COMPLETE) {
+                log.info("🔄 ROUND_COMPLETE recibido de player {} (normalized: {}) en game {}: payload={}", 
+                    playerId, normalizedPlayerId, gameId, message.getPayload());
+                
+                // Extraer ante y blind del payload
+                try {
+                    if (message.getPayload() != null) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> payloadMap = (java.util.Map<String, Object>) message.getPayload();
+                        if (payloadMap.containsKey("data")) {
+                            @SuppressWarnings("unchecked")
+                            java.util.Map<String, Object> dataMap = (java.util.Map<String, Object>) payloadMap.get("data");
+                            if (dataMap != null && dataMap.containsKey("ante") && dataMap.containsKey("blind")) {
+                                Integer ante = dataMap.get("ante") instanceof Number ? 
+                                    ((Number) dataMap.get("ante")).intValue() : null;
+                                String blind = dataMap.get("blind") != null ? dataMap.get("blind").toString() : null;
+                                
+                                if (ante != null && blind != null) {
+                                    // Actualizar progreso del jugador
+                                    gameService.updatePlayerProgress(gameId, normalizedPlayerId, ante, blind);
+                                    
+                                    // Verificar condiciones de victoria
+                                    GameService.VictoryCheckResult victoryResult = 
+                                        gameService.checkVictoryConditions(gameId, normalizedPlayerId);
+                                    
+                                    if (victoryResult.hasVictory()) {
+                                        // Enviar GAME_WON al ganador y GAME_LOST al perdedor
+                                        String winnerId = victoryResult.getWinnerId();
+                                        String loserId = victoryResult.getLoserId();
+                                        String reason = victoryResult.getReason();
+                                        
+                                        log.info("🏆 Victoria detectada: winner={}, loser={}, reason={}", 
+                                            winnerId, loserId, reason);
+                                        
+                                        // Crear mensaje GAME_WON para el ganador
+                                        java.util.Map<String, Object> wonPayload = new java.util.HashMap<>();
+                                        java.util.Map<String, Object> wonData = new java.util.HashMap<>();
+                                        wonData.put("reason", reason);
+                                        wonData.put("opponentId", loserId);
+                                        wonData.put("winnerId", winnerId);
+                                        wonPayload.put("action", "GAME_WON");
+                                        wonPayload.put("data", wonData);
+                                        
+                                        GameMessage wonMessage = GameMessage.create(
+                                            MessageType.GAME_WON,
+                                            gameId,
+                                            winnerId,
+                                            wonPayload
+                                        );
+                                        
+                                        // Crear mensaje GAME_LOST para el perdedor
+                                        java.util.Map<String, Object> lostPayload = new java.util.HashMap<>();
+                                        java.util.Map<String, Object> lostData = new java.util.HashMap<>();
+                                        lostData.put("reason", reason.equals("opponent_no_hands") ? "no_hands" : reason);
+                                        lostPayload.put("action", "GAME_LOST");
+                                        lostPayload.put("data", lostData);
+                                        
+                                        GameMessage lostMessage = GameMessage.create(
+                                            MessageType.GAME_LOST,
+                                            gameId,
+                                            loserId,
+                                            lostPayload
+                                        );
+                                        
+                                        // Enviar mensajes a ambos jugadores
+                                        messagingTemplate.convertAndSend("/topic/game/" + gameId, wonMessage);
+                                        messagingTemplate.convertAndSend("/topic/game/" + gameId, lostMessage);
+                                        
+                                        log.info("✅ GAME_WON y GAME_LOST enviados a /topic/game/{}", gameId);
+                                        
+                                        // Retornar el mensaje original también
+                                        return message;
+                                    } else if (victoryResult.isTie()) {
+                                        // Enviar GAME_LOST con reason 'tie' a ambos jugadores
+                                        java.util.Map<String, Object> tiePayload = new java.util.HashMap<>();
+                                        java.util.Map<String, Object> tieData = new java.util.HashMap<>();
+                                        tieData.put("reason", "tie");
+                                        tieData.put("message", "Empate - ambos jugadores se quedaron sin manos en el mismo ante");
+                                        tiePayload.put("action", "GAME_LOST");
+                                        tiePayload.put("data", tieData);
+                                        
+                                        GameMessage tieMessage1 = GameMessage.create(
+                                            MessageType.GAME_LOST,
+                                            gameId,
+                                            normalizedPlayerId,
+                                            tiePayload
+                                        );
+                                        
+                                        String opponentId = gameService.getOpponentId(gameId, normalizedPlayerId);
+                                        GameMessage tieMessage2 = GameMessage.create(
+                                            MessageType.GAME_LOST,
+                                            gameId,
+                                            opponentId,
+                                            tiePayload
+                                        );
+                                        
+                                        messagingTemplate.convertAndSend("/topic/game/" + gameId, tieMessage1);
+                                        messagingTemplate.convertAndSend("/topic/game/" + gameId, tieMessage2);
+                                        
+                                        log.info("✅ GAME_LOST (tie) enviado a ambos jugadores en /topic/game/{}", gameId);
+                                        
+                                        return message;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Error procesando ROUND_COMPLETE: {}", e.getMessage(), e);
+                }
+                
+            } else if (message.getType() == MessageType.GAME_LOST) {
+                log.info("💀 GAME_LOST recibido de player {} (normalized: {}) en game {}: payload={}", 
+                    playerId, normalizedPlayerId, gameId, message.getPayload());
+                
+                // Procesar GAME_LOST según la razón
+                try {
+                    if (message.getPayload() != null) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> payloadMap = (java.util.Map<String, Object>) message.getPayload();
+                        if (payloadMap.containsKey("data")) {
+                            @SuppressWarnings("unchecked")
+                            java.util.Map<String, Object> dataMap = (java.util.Map<String, Object>) payloadMap.get("data");
+                            if (dataMap != null && dataMap.containsKey("reason")) {
+                                String reason = dataMap.get("reason").toString();
+                                
+                                if ("no_hands".equals(reason)) {
+                                    // Registrar que el jugador se quedó sin manos
+                                    Integer ante = dataMap.get("ante") instanceof Number ? 
+                                        ((Number) dataMap.get("ante")).intValue() : null;
+                                    String blind = dataMap.get("blind") != null ? 
+                                        dataMap.get("blind").toString() : null;
+                                    
+                                    if (ante != null && blind != null) {
+                                        gameService.registerNoHands(gameId, normalizedPlayerId, ante, blind);
+                                        log.info("💡 Registrado: Player {} se quedó sin manos en ante={}, blind={}", 
+                                            normalizedPlayerId, ante, blind);
+                                        
+                                        // Verificar si el oponente ya está más adelante
+                                        String opponentId = gameService.getOpponentId(gameId, normalizedPlayerId);
+                                        GameService.VictoryCheckResult victoryResult = 
+                                            gameService.checkVictoryConditions(gameId, opponentId);
+                                        
+                                        if (victoryResult.hasVictory() && opponentId.equals(victoryResult.getWinnerId())) {
+                                            // El oponente ya ganó
+                                            log.info("🏆 El oponente {} ya está más adelante - victoria inmediata", opponentId);
+                                            
+                                            java.util.Map<String, Object> wonPayload = new java.util.HashMap<>();
+                                            java.util.Map<String, Object> wonData = new java.util.HashMap<>();
+                                            wonData.put("reason", "opponent_no_hands");
+                                            wonData.put("opponentId", normalizedPlayerId);
+                                            wonData.put("winnerId", opponentId);
+                                            wonPayload.put("action", "GAME_WON");
+                                            wonPayload.put("data", wonData);
+                                            
+                                            GameMessage wonMessage = GameMessage.create(
+                                                MessageType.GAME_WON,
+                                                gameId,
+                                                opponentId,
+                                                wonPayload
+                                            );
+                                            
+                                            messagingTemplate.convertAndSend("/topic/game/" + gameId, wonMessage);
+                                            log.info("✅ GAME_WON enviado al oponente en /topic/game/{}", gameId);
+                                        }
+                                    }
+                                } else if ("tie".equals(reason)) {
+                                    log.info("💡 Empate detectado en game {}", gameId);
+                                    // El empate ya se maneja en checkVictoryConditions
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Error procesando GAME_LOST: {}", e.getMessage(), e);
+                }
+                
+            } else if (message.getType() == MessageType.TIME_OUT) {
+                log.info("⏰ TIME_OUT recibido de player {} (normalized: {}) en game {}: El jugador se quedó sin tiempo", 
+                    playerId, normalizedPlayerId, gameId);
+            } else if (message.getType() == MessageType.GAME_WON) {
+                log.info("🏆 GAME_WON recibido de player {} (normalized: {}) en game {}: payload={}", 
+                    playerId, normalizedPlayerId, gameId, message.getPayload());
+                // Extraer información del payload para logging adicional
+                if (message.getPayload() != null) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> payloadMap = (java.util.Map<String, Object>) message.getPayload();
+                        if (payloadMap.containsKey("data")) {
+                            @SuppressWarnings("unchecked")
+                            java.util.Map<String, Object> dataMap = (java.util.Map<String, Object>) payloadMap.get("data");
+                            if (dataMap != null && dataMap.containsKey("reason")) {
+                                String reason = dataMap.get("reason").toString();
+                                log.info("💡 Razón de victoria: {}", reason);
+                                if ("opponent_timeout".equals(reason)) {
+                                    log.info("💡 El oponente se quedó sin tiempo - notificando al oponente");
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.debug("No se pudo parsear el payload para logging adicional: {}", e.getMessage());
+                    }
+                }
+            } else if (message.getType() == MessageType.GAME_OVER || message.getType() == MessageType.VICTORY) {
+                log.info("🏆 {} recibido de player {} (normalized: {}) en game {}: payload={}", 
+                    message.getType(), playerId, normalizedPlayerId, gameId, message.getPayload());
+            } else {
+                log.info("📨 Mensaje de juego recibido: gameId={}, playerId={} (normalized: {}), type={}", 
+                    gameId, playerId, normalizedPlayerId, message.getType());
+            }
             
             // Actualizar timestamp de actividad
             gameService.updateGameActivity(gameId);
             
             // ✅ IMPORTANTE: Retornar el mensaje hace que se envíe a TODOS los suscritos
+            // Esto incluye al emisor y al oponente
+            if (message.getType() == MessageType.ROUND_COMPLETE) {
+                log.info("✅ ROUND_COMPLETE será enviado a /topic/game/{}", gameId);
+            } else if (message.getType() == MessageType.TIME_OUT) {
+                log.info("✅ TIME_OUT será enviado a /topic/game/{} - El oponente recibirá notificación de victoria", gameId);
+            } else if (message.getType() == MessageType.GAME_WON) {
+                log.info("✅ GAME_WON será enviado a /topic/game/{} - Ambos jugadores recibirán la notificación", gameId);
+            } else if (message.getType() == MessageType.GAME_LOST) {
+                log.info("✅ GAME_LOST será enviado a /topic/game/{} - Ambos jugadores recibirán la notificación", gameId);
+            } else if (message.getType() == MessageType.GAME_OVER || message.getType() == MessageType.VICTORY) {
+                log.info("✅ {} será enviado a /topic/game/{}", message.getType(), gameId);
+            }
             return message;
             
         } catch (Exception e) {
-            log.error("Error handling game message: {}", e.getMessage());
+            log.error("Error handling game message: {}", e.getMessage(), e);
             return GameMessage.error(gameId, message.getPlayerId(), "Error al enviar mensaje: " + e.getMessage());
         }
     }
@@ -604,6 +860,18 @@ public class GameWebSocketController {
      * Reenvía mensajes de juego entre jugadores sin procesarlos.
      * El backend solo actúa como intermediario.
      * Ruta alternativa: /app/game/{gameId}/message
+     * 
+     * Este método maneja todos los tipos de mensajes de juego, incluyendo:
+     * - GAME_MESSAGE
+     * - ROUND_COMPLETE
+     * - TIME_OUT (cuando un jugador se queda sin tiempo)
+     * - GAME_WON (cuando un jugador gana, incluyendo por timeout del oponente)
+     * - GAME_LOST (cuando un jugador pierde)
+     * - GAME_OVER / VICTORY (cuando el juego termina)
+     * - Y cualquier otro tipo de mensaje de juego
+     * 
+     * IMPORTANTE: Todos los mensajes se reenvían a /topic/game/{gameId} para que
+     * ambos jugadores los reciban. Esto incluye GAME_WON y GAME_LOST.
      */
     @MessageMapping("/game/{gameId}/message")
     public void relayGameMessage(
@@ -613,31 +881,105 @@ public class GameWebSocketController {
     ) {
         try {
             String playerId = extractPlayerId(message, principal);
-            message.setPlayerId(playerId);
+            // Normalizar playerId para consistencia
+            String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+            
+            log.info("=== RELAY GAME MESSAGE ===");
+            log.info("GameId: {}", gameId);
+            log.info("PlayerId (original): {}", playerId);
+            log.info("PlayerId (normalized): {}", normalizedPlayerId);
+            log.info("Message type: {}", message.getType());
+            
+            message.setPlayerId(normalizedPlayerId);
             message.setGameId(gameId);
             
             // Verificar que el jugador pertenece al juego
-            if (!gameService.isPlayerInGame(gameId, playerId)) {
-                log.warn("Player {} attempted to send message to game {} but is not a participant", 
-                    playerId, gameId);
-                sendError(playerId, gameId, "No perteneces a esta partida");
+            boolean isInGame = gameService.isPlayerInGame(gameId, normalizedPlayerId);
+            log.info("Player validation: isInGame={}, gameId={}, playerId={}", isInGame, gameId, normalizedPlayerId);
+            
+            if (!isInGame) {
+                // Log detallado para diagnóstico
+                try {
+                    com.arsw.balatro.model.dto.GameState gameState = gameService.getGameState(gameId);
+                    log.error("❌ Player {} (normalized: {}) NOT in game {}", normalizedPlayerId, normalizedPlayerId, gameId);
+                    log.error("💡 Game state: player1Id={}, player2Id={}", gameState.getPlayer1Id(), gameState.getPlayer2Id());
+                    log.error("💡 Comparison: player1Id.equals? {}, player2Id.equals? {}", 
+                        gameState.getPlayer1Id().equals(normalizedPlayerId),
+                        gameState.getPlayer2Id().equals(normalizedPlayerId));
+                    log.error("💡 Debug info:\n{}", gameService.getDebugInfo());
+                } catch (Exception e) {
+                    log.error("💡 Game {} not found or error getting game state: {}", gameId, e.getMessage());
+                    log.error("💡 Debug info:\n{}", gameService.getDebugInfo());
+                }
+                sendError(normalizedPlayerId, gameId, "No perteneces a esta partida");
                 return;
             }
             
-            log.debug("Relaying message from player {} in game {}: type={}", 
-                playerId, gameId, message.getType());
+            // Log detallado para mensajes importantes
+            if (message.getType() == MessageType.ROUND_COMPLETE) {
+                log.info("🔄 Reenviando ROUND_COMPLETE de player {} (normalized: {}) en game {}: payload={}", 
+                    playerId, normalizedPlayerId, gameId, message.getPayload());
+            } else if (message.getType() == MessageType.TIME_OUT) {
+                log.info("⏰ Reenviando TIME_OUT de player {} (normalized: {}) en game {}: El jugador se quedó sin tiempo", 
+                    playerId, normalizedPlayerId, gameId);
+            } else if (message.getType() == MessageType.GAME_WON) {
+                log.info("🏆 Reenviando GAME_WON de player {} (normalized: {}) en game {}: payload={}", 
+                    playerId, normalizedPlayerId, gameId, message.getPayload());
+                // Extraer información del payload para logging adicional
+                if (message.getPayload() != null) {
+                    try {
+                        @SuppressWarnings("unchecked")
+                        java.util.Map<String, Object> payloadMap = (java.util.Map<String, Object>) message.getPayload();
+                        if (payloadMap.containsKey("data")) {
+                            @SuppressWarnings("unchecked")
+                            java.util.Map<String, Object> dataMap = (java.util.Map<String, Object>) payloadMap.get("data");
+                            if (dataMap != null && dataMap.containsKey("reason")) {
+                                String reason = dataMap.get("reason").toString();
+                                log.info("💡 Razón de victoria: {}", reason);
+                                if ("opponent_timeout".equals(reason)) {
+                                    log.info("💡 El oponente se quedó sin tiempo - notificando al oponente");
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.debug("No se pudo parsear el payload para logging adicional: {}", e.getMessage());
+                    }
+                }
+            } else if (message.getType() == MessageType.GAME_LOST) {
+                log.info("💀 Reenviando GAME_LOST de player {} (normalized: {}) en game {}: payload={}", 
+                    playerId, normalizedPlayerId, gameId, message.getPayload());
+            } else if (message.getType() == MessageType.GAME_OVER || message.getType() == MessageType.VICTORY) {
+                log.info("🏆 Reenviando {} de player {} (normalized: {}) en game {}: payload={}", 
+                    message.getType(), playerId, normalizedPlayerId, gameId, message.getPayload());
+            } else {
+                log.debug("Relaying message from player {} (normalized: {}) in game {}: type={}", 
+                    playerId, normalizedPlayerId, gameId, message.getType());
+            }
             
             // Actualizar timestamp de actividad
             gameService.updateGameActivity(gameId);
             
             // Reenviar el mensaje a ambos jugadores en el topic del juego
+            // Esto incluye al emisor y al oponente
             messagingTemplate.convertAndSend(
                 "/topic/game/" + gameId,
                 message
             );
             
+            if (message.getType() == MessageType.ROUND_COMPLETE) {
+                log.info("✅ ROUND_COMPLETE reenviado exitosamente a /topic/game/{}", gameId);
+            } else if (message.getType() == MessageType.TIME_OUT) {
+                log.info("✅ TIME_OUT reenviado exitosamente a /topic/game/{} - El oponente recibirá notificación de victoria", gameId);
+            } else if (message.getType() == MessageType.GAME_WON) {
+                log.info("✅ GAME_WON reenviado exitosamente a /topic/game/{} - Ambos jugadores recibirán la notificación", gameId);
+            } else if (message.getType() == MessageType.GAME_LOST) {
+                log.info("✅ GAME_LOST reenviado exitosamente a /topic/game/{} - Ambos jugadores recibirán la notificación", gameId);
+            } else if (message.getType() == MessageType.GAME_OVER || message.getType() == MessageType.VICTORY) {
+                log.info("✅ {} reenviado exitosamente a /topic/game/{}", message.getType(), gameId);
+            }
+            
         } catch (Exception e) {
-            log.error("Error relaying game message: {}", e.getMessage());
+            log.error("Error relaying game message: {}", e.getMessage(), e);
             sendError(message.getPlayerId(), gameId, "Error al enviar mensaje: " + e.getMessage());
         }
     }
@@ -743,9 +1085,23 @@ public class GameWebSocketController {
     }
 
     /**
+     * Normaliza un playerId: trim + lowercase
+     * Esto asegura consistencia en las comparaciones con GameService
+     */
+    private String normalizePlayerId(String playerId) {
+        if (playerId == null) {
+            return null;
+        }
+        return playerId.trim().toLowerCase();
+    }
+    
+    /**
      * Extrae el playerId del usuario autenticado.
      * Con Cognito, siempre usamos el username de Cognito como playerId para mantener consistencia.
      * Si el mensaje trae un playerId diferente, lo ignoramos y usamos el del Principal.
+     * 
+     * IMPORTANTE: El playerId retornado NO está normalizado. Debe normalizarse antes de usarse
+     * en comparaciones con GameService.
      */
     private String extractPlayerId(GameMessage message, Principal principal) {
         // Con Cognito, siempre usar el username del Principal (viene del token JWT)
@@ -755,9 +1111,13 @@ public class GameWebSocketController {
             log.debug("Using Cognito username as playerId: {}", cognitoUsername);
             
             // Si el mensaje trae un playerId diferente, loguear advertencia
-            if (message != null && message.getPlayerId() != null && !message.getPlayerId().equals(cognitoUsername)) {
-                log.warn("Message contains different playerId ({}), but using Cognito username ({}) instead", 
-                    message.getPlayerId(), cognitoUsername);
+            if (message != null && message.getPlayerId() != null) {
+                String normalizedMessagePlayerId = normalizePlayerId(message.getPlayerId());
+                String normalizedCognitoUsername = normalizePlayerId(cognitoUsername);
+                if (!normalizedMessagePlayerId.equals(normalizedCognitoUsername)) {
+                    log.warn("Message contains different playerId ({}), but using Cognito username ({}) instead", 
+                        message.getPlayerId(), cognitoUsername);
+                }
             }
             
             return cognitoUsername;

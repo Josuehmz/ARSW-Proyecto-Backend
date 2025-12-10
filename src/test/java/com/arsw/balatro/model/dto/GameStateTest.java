@@ -42,6 +42,14 @@ class GameStateTest {
         assertNull(gameState.getPlayer2Id());
         assertEquals(0L, gameState.getCreatedAt());
         assertEquals(0L, gameState.getLastUpdate());
+        // Verificar que los nuevos campos también son null
+        assertNull(gameState.getPlayer1Ante());
+        assertNull(gameState.getPlayer1Blind());
+        assertNull(gameState.getPlayer2Ante());
+        assertNull(gameState.getPlayer2Blind());
+        assertNull(gameState.getIsTie());
+        assertNull(gameState.getWinnerId());
+        assertNull(gameState.getGameEnded());
     }
 
     @Test
@@ -56,6 +64,14 @@ class GameStateTest {
         gameState.setPlayer2Id("player4");
         gameState.setCreatedAt(9876543210L);
         gameState.setLastUpdate(9876543210L);
+        // Establecer algunos de los nuevos campos
+        gameState.setPlayer1Ante(1);
+        gameState.setPlayer1Blind("big");
+        gameState.setPlayer2Ante(2);
+        gameState.setPlayer2Blind("small");
+        gameState.setIsTie(false);
+        gameState.setWinnerId("player3");
+        gameState.setGameEnded(true);
 
         // Then
         assertEquals("game456", gameState.getGameId());
@@ -63,14 +79,36 @@ class GameStateTest {
         assertEquals("player4", gameState.getPlayer2Id());
         assertEquals(9876543210L, gameState.getCreatedAt());
         assertEquals(9876543210L, gameState.getLastUpdate());
+        assertEquals(1, gameState.getPlayer1Ante());
+        assertEquals("big", gameState.getPlayer1Blind());
+        assertEquals(2, gameState.getPlayer2Ante());
+        assertEquals("small", gameState.getPlayer2Blind());
+        assertEquals(false, gameState.getIsTie());
+        assertEquals("player3", gameState.getWinnerId());
+        assertEquals(true, gameState.getGameEnded());
     }
 
     @Test
     @DisplayName("Should create GameState with AllArgsConstructor")
     void shouldCreateGameStateWithAllArgsConstructor() {
-        // When
+        // When - Usar el constructor completo con todos los campos (pueden ser null para campos opcionales)
         GameState gameState = new GameState(
-            "game123", "player1", "player2", 1234567890L, 1234567890L
+            "game123",           // gameId
+            "player1",           // player1Id
+            "player2",           // player2Id
+            1234567890L,         // createdAt
+            1234567890L,         // lastUpdate
+            null,                // player1Ante
+            null,                // player1Blind
+            null,                // player2Ante
+            null,                // player2Blind
+            null,                // player1NoHandsAnte
+            null,                // player1NoHandsBlind
+            null,                // player2NoHandsAnte
+            null,                // player2NoHandsBlind
+            null,                // isTie
+            null,                // winnerId
+            null                 // gameEnded
         );
 
         // Then
