@@ -498,13 +498,13 @@ class GameWebSocketControllerTest {
         message.setPlayerId("player1");
         String gameId = "game123";
         
-        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+        when(gameService.isPlayerInGame(eq(gameId), anyString())).thenReturn(true);
 
         // When
         controller.registerGameSession(gameId, message, principal, headerAccessor);
 
         // Then
-        verify(sessionService).registerSession("player1", "session1");
+        verify(sessionService).registerSession(eq("player1"), eq("session1"));
     }
 
     @Test
@@ -515,7 +515,7 @@ class GameWebSocketControllerTest {
         message.setPlayerId("player1");
         String gameId = "game123";
         
-        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(false);
+        when(gameService.isPlayerInGame(eq(gameId), anyString())).thenReturn(false);
 
         // When
         controller.registerGameSession(gameId, message, principal, headerAccessor);
@@ -533,16 +533,17 @@ class GameWebSocketControllerTest {
         message.setPlayerId("player1");
         String gameId = "game123";
         
-        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+        when(gameService.isPlayerInGame(eq(gameId), anyString())).thenReturn(true);
 
         // When
-        GameMessage result = controller.handleGameMessage(gameId, message, principal);
+        GameMessage result = controller.handleGameMessage(gameId, message, principal, headerAccessor);
 
         // Then
         assertNotNull(result);
         assertEquals("player1", result.getPlayerId());
         assertEquals(gameId, result.getGameId());
         verify(gameService).updateGameActivity(gameId);
+        verify(sessionService).registerSession(eq("player1"), eq("session1"));
     }
 
     @Test
@@ -554,10 +555,10 @@ class GameWebSocketControllerTest {
         message.setPlayerId("player1");
         String gameId = "game123";
         
-        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(false);
+        when(gameService.isPlayerInGame(eq(gameId), anyString())).thenReturn(false);
 
         // When
-        GameMessage result = controller.handleGameMessage(gameId, message, principal);
+        GameMessage result = controller.handleGameMessage(gameId, message, principal, headerAccessor);
 
         // Then
         assertNotNull(result);
@@ -573,13 +574,14 @@ class GameWebSocketControllerTest {
         message.setPlayerId("player1");
         String gameId = "game123";
         
-        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+        when(gameService.isPlayerInGame(eq(gameId), anyString())).thenReturn(true);
 
         // When
-        controller.relayGameMessage(gameId, message, principal);
+        controller.relayGameMessage(gameId, message, principal, headerAccessor);
 
         // Then
         verify(gameService).updateGameActivity(gameId);
+        verify(sessionService).registerSession(eq("player1"), eq("session1"));
         verify(messagingTemplate).convertAndSend(
             eq("/topic/game/" + gameId),
             any(GameMessage.class)
@@ -612,7 +614,7 @@ class GameWebSocketControllerTest {
         message.setMessage("Hello");
         String gameId = "game123";
         
-        when(gameService.isPlayerInGame(gameId, "player1")).thenReturn(true);
+        when(gameService.isPlayerInGame(eq(gameId), anyString())).thenReturn(true);
 
         // When
         controller.handleChatMessageAlt(gameId, message, principal);
@@ -650,10 +652,10 @@ class GameWebSocketControllerTest {
         message.setPlayerId("player1");
         String gameId = "game123";
         
-        when(gameService.isPlayerInGame(gameId, "player1")).thenThrow(new RuntimeException("Error"));
+        when(gameService.isPlayerInGame(eq(gameId), anyString())).thenThrow(new RuntimeException("Error"));
 
         // When
-        GameMessage result = controller.handleGameMessage(gameId, message, principal);
+        GameMessage result = controller.handleGameMessage(gameId, message, principal, headerAccessor);
 
         // Then
         assertNotNull(result);
