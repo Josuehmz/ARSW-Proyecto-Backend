@@ -24,5 +24,11 @@ public enum MessageType {
     PLAYER_CONNECTED,
     PLAYER_DISCONNECTED,
     PING,
-    PONG
+    PONG,
+    TIMER_SYNC,
+    TIMER_START,
+    TIMER_STOP,
+    TIMER_UPDATE,
+    GAME_STATE_SYNC,
+    PLAYER_ACTION_SYNC
 }

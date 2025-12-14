@@ -566,6 +566,8 @@ public class GameWebSocketController {
      * - GAME_WON (cuando un jugador gana, incluyendo por timeout del oponente)
      * - GAME_LOST (cuando un jugador pierde)
      * - GAME_OVER / VICTORY (cuando el juego termina)
+     * - TIMER_SYNC, TIMER_START, TIMER_STOP, TIMER_UPDATE (sincronización de cronómetro)
+     * - GAME_STATE_SYNC, PLAYER_ACTION_SYNC (sincronización de estado)
      * - Y cualquier otro tipo de mensaje de juego
      * 
      * IMPORTANTE: Todos los mensajes se reenvían a /topic/game/{gameId} para que
@@ -576,11 +578,13 @@ public class GameWebSocketController {
     public GameMessage handleGameMessage(
             @DestinationVariable String gameId,
             @Payload GameMessage message,
-            Principal principal
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor
     ) {
         try {
             String playerId = extractPlayerId(message, principal);
-            String sessionId = principal != null ? principal.getName() : null;
+            // Obtener el sessionId real de Spring WebSocket
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
             
             // Normalizar playerId para consistencia (GameService normaliza internamente, pero mejor hacerlo aquí también)
             String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
@@ -590,10 +594,14 @@ public class GameWebSocketController {
             log.info("PlayerId (original): {}", playerId);
             log.info("PlayerId (normalized): {}", normalizedPlayerId);
             log.info("Message type: {}", message.getType());
+            log.info("SessionId: {}", sessionId);
             
-            // Registrar/actualizar sesión cuando se envía un mensaje de juego
+            // ✅ CRÍTICO: Registrar/actualizar sesión cuando se envía un mensaje de juego
+            // Esto asegura que las sesiones WebRTC se mantengan activas
             if (sessionId != null && normalizedPlayerId != null) {
                 sessionService.registerSession(normalizedPlayerId, sessionId);
+                log.debug("✅ Sesión actualizada para mantener WebRTC activo: playerId={}, sessionId={}", 
+                    normalizedPlayerId, sessionId);
             }
             
             message.setPlayerId(normalizedPlayerId);
@@ -624,6 +632,14 @@ public class GameWebSocketController {
             if (message.getType() == MessageType.ROUND_COMPLETE) {
                 log.info("🔄 ROUND_COMPLETE recibido de player {} (normalized: {}) en game {}: payload={}", 
                     playerId, normalizedPlayerId, gameId, message.getPayload());
+                
+                // ✅ CRÍTICO: Asegurar que la sesión se mantenga activa después de ROUND_COMPLETE
+                // Esto previene que el micrófono se desactive
+                if (sessionId != null && normalizedPlayerId != null) {
+                    sessionService.registerSession(normalizedPlayerId, sessionId);
+                    log.info("✅ Sesión WebRTC mantenida activa después de ROUND_COMPLETE: playerId={}, sessionId={}", 
+                        normalizedPlayerId, sessionId);
+                }
                 
                 // Extraer ante y blind del payload
                 try {
@@ -827,6 +843,18 @@ public class GameWebSocketController {
             } else if (message.getType() == MessageType.GAME_OVER || message.getType() == MessageType.VICTORY) {
                 log.info("🏆 {} recibido de player {} (normalized: {}) en game {}: payload={}", 
                     message.getType(), playerId, normalizedPlayerId, gameId, message.getPayload());
+            } else if (message.getType() == MessageType.TIMER_SYNC || 
+                       message.getType() == MessageType.TIMER_START || 
+                       message.getType() == MessageType.TIMER_STOP || 
+                       message.getType() == MessageType.TIMER_UPDATE) {
+                log.info("⏱️ Mensaje de cronómetro recibido: type={}, gameId={}, playerId={} (normalized: {})", 
+                    message.getType(), gameId, playerId, normalizedPlayerId);
+                // Los mensajes de cronómetro se reenvían automáticamente a ambos jugadores
+            } else if (message.getType() == MessageType.GAME_STATE_SYNC || 
+                       message.getType() == MessageType.PLAYER_ACTION_SYNC) {
+                log.info("🔄 Mensaje de sincronización recibido: type={}, gameId={}, playerId={} (normalized: {})", 
+                    message.getType(), gameId, playerId, normalizedPlayerId);
+                // Los mensajes de sincronización se reenvían automáticamente a ambos jugadores
             } else {
                 log.info("📨 Mensaje de juego recibido: gameId={}, playerId={} (normalized: {}), type={}", 
                     gameId, playerId, normalizedPlayerId, message.getType());
@@ -868,6 +896,8 @@ public class GameWebSocketController {
      * - GAME_WON (cuando un jugador gana, incluyendo por timeout del oponente)
      * - GAME_LOST (cuando un jugador pierde)
      * - GAME_OVER / VICTORY (cuando el juego termina)
+     * - TIMER_SYNC, TIMER_START, TIMER_STOP, TIMER_UPDATE (sincronización de cronómetro)
+     * - GAME_STATE_SYNC, PLAYER_ACTION_SYNC (sincronización de estado)
      * - Y cualquier otro tipo de mensaje de juego
      * 
      * IMPORTANTE: Todos los mensajes se reenvían a /topic/game/{gameId} para que
@@ -877,10 +907,13 @@ public class GameWebSocketController {
     public void relayGameMessage(
             @DestinationVariable String gameId,
             @Payload GameMessage message,
-            Principal principal
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor
     ) {
         try {
             String playerId = extractPlayerId(message, principal);
+            // Obtener el sessionId real de Spring WebSocket
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
             // Normalizar playerId para consistencia
             String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
             
@@ -889,6 +922,15 @@ public class GameWebSocketController {
             log.info("PlayerId (original): {}", playerId);
             log.info("PlayerId (normalized): {}", normalizedPlayerId);
             log.info("Message type: {}", message.getType());
+            log.info("SessionId: {}", sessionId);
+            
+            // ✅ CRÍTICO: Registrar/actualizar sesión cuando se envía un mensaje de juego
+            // Esto asegura que las sesiones WebRTC se mantengan activas
+            if (sessionId != null && normalizedPlayerId != null) {
+                sessionService.registerSession(normalizedPlayerId, sessionId);
+                log.debug("✅ Sesión actualizada para mantener WebRTC activo: playerId={}, sessionId={}", 
+                    normalizedPlayerId, sessionId);
+            }
             
             message.setPlayerId(normalizedPlayerId);
             message.setGameId(gameId);
@@ -919,6 +961,14 @@ public class GameWebSocketController {
             if (message.getType() == MessageType.ROUND_COMPLETE) {
                 log.info("🔄 Reenviando ROUND_COMPLETE de player {} (normalized: {}) en game {}: payload={}", 
                     playerId, normalizedPlayerId, gameId, message.getPayload());
+                
+                // ✅ CRÍTICO: Asegurar que la sesión se mantenga activa después de ROUND_COMPLETE
+                // Esto previene que el micrófono se desactive
+                if (sessionId != null && normalizedPlayerId != null) {
+                    sessionService.registerSession(normalizedPlayerId, sessionId);
+                    log.info("✅ Sesión WebRTC mantenida activa después de ROUND_COMPLETE: playerId={}, sessionId={}", 
+                        normalizedPlayerId, sessionId);
+                }
             } else if (message.getType() == MessageType.TIME_OUT) {
                 log.info("⏰ Reenviando TIME_OUT de player {} (normalized: {}) en game {}: El jugador se quedó sin tiempo", 
                     playerId, normalizedPlayerId, gameId);
@@ -951,6 +1001,16 @@ public class GameWebSocketController {
             } else if (message.getType() == MessageType.GAME_OVER || message.getType() == MessageType.VICTORY) {
                 log.info("🏆 Reenviando {} de player {} (normalized: {}) en game {}: payload={}", 
                     message.getType(), playerId, normalizedPlayerId, gameId, message.getPayload());
+            } else if (message.getType() == MessageType.TIMER_SYNC || 
+                       message.getType() == MessageType.TIMER_START || 
+                       message.getType() == MessageType.TIMER_STOP || 
+                       message.getType() == MessageType.TIMER_UPDATE) {
+                log.info("⏱️ Reenviando mensaje de cronómetro: type={}, gameId={}, playerId={} (normalized: {})", 
+                    message.getType(), gameId, playerId, normalizedPlayerId);
+            } else if (message.getType() == MessageType.GAME_STATE_SYNC || 
+                       message.getType() == MessageType.PLAYER_ACTION_SYNC) {
+                log.info("🔄 Reenviando mensaje de sincronización: type={}, gameId={}, playerId={} (normalized: {})", 
+                    message.getType(), gameId, playerId, normalizedPlayerId);
             } else {
                 log.debug("Relaying message from player {} (normalized: {}) in game {}: type={}", 
                     playerId, normalizedPlayerId, gameId, message.getType());
@@ -1063,6 +1123,161 @@ public class GameWebSocketController {
         return message;
     }
 
+    /**
+     * Sincronización de cronómetro entre jugadores
+     * Endpoint: /app/game/{gameId}/timer
+     * 
+     * Este endpoint permite sincronizar el cronómetro entre ambos jugadores.
+     * Los mensajes se reenvían a ambos jugadores para mantener sincronización.
+     */
+    @MessageMapping("/game/{gameId}/timer")
+    public void handleTimerSync(
+            @DestinationVariable String gameId,
+            @Payload GameMessage message,
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor
+    ) {
+        try {
+            String playerId = extractPlayerId(message, principal);
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
+            String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+            
+            log.info("⏱️ Timer sync recibido: gameId={}, playerId={} (normalized: {}), type={}", 
+                gameId, normalizedPlayerId, normalizedPlayerId, message.getType());
+            
+            // Verificar que el jugador pertenece al juego
+            if (!gameService.isPlayerInGame(gameId, normalizedPlayerId)) {
+                log.warn("Player {} attempted to sync timer in game {} but is not a participant", 
+                    normalizedPlayerId, gameId);
+                return;
+            }
+            
+            // ✅ CRÍTICO: Mantener sesión activa para WebRTC
+            if (sessionId != null && normalizedPlayerId != null) {
+                sessionService.registerSession(normalizedPlayerId, sessionId);
+            }
+            
+            // Establecer gameId y playerId en el mensaje
+            message.setGameId(gameId);
+            message.setPlayerId(normalizedPlayerId);
+            
+            // Reenviar a ambos jugadores para sincronización
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, message);
+            
+            log.info("✅ Timer sync reenviado a /topic/game/{}", gameId);
+            
+        } catch (Exception e) {
+            log.error("Error handling timer sync: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Sincronización de estado del juego
+     * Endpoint: /app/game/{gameId}/sync
+     * 
+     * Este endpoint permite sincronizar el estado del juego y las acciones del rival.
+     * Los mensajes se reenvían a ambos jugadores para mantener sincronización.
+     */
+    @MessageMapping("/game/{gameId}/sync")
+    public void handleGameStateSync(
+            @DestinationVariable String gameId,
+            @Payload GameMessage message,
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor
+    ) {
+        try {
+            String playerId = extractPlayerId(message, principal);
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
+            String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+            
+            log.info("🔄 Game state sync recibido: gameId={}, playerId={} (normalized: {}), type={}", 
+                gameId, normalizedPlayerId, normalizedPlayerId, message.getType());
+            
+            // Verificar que el jugador pertenece al juego
+            if (!gameService.isPlayerInGame(gameId, normalizedPlayerId)) {
+                log.warn("Player {} attempted to sync state in game {} but is not a participant", 
+                    normalizedPlayerId, gameId);
+                return;
+            }
+            
+            // ✅ CRÍTICO: Mantener sesión activa para WebRTC
+            if (sessionId != null && normalizedPlayerId != null) {
+                sessionService.registerSession(normalizedPlayerId, sessionId);
+            }
+            
+            // Establecer gameId y playerId en el mensaje
+            message.setGameId(gameId);
+            message.setPlayerId(normalizedPlayerId);
+            
+            // Reenviar a ambos jugadores para sincronización
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, message);
+            
+            log.info("✅ Game state sync reenviado a /topic/game/{}", gameId);
+            
+        } catch (Exception e) {
+            log.error("Error handling game state sync: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Solicitar estado actual del juego
+     * Endpoint: /app/game/{gameId}/state
+     * 
+     * Este endpoint permite a un jugador solicitar el estado actual del juego,
+     * incluyendo el progreso de ambos jugadores.
+     */
+    @MessageMapping("/game/{gameId}/state")
+    public void handleGameStateRequest(
+            @DestinationVariable String gameId,
+            @Payload GameMessage message,
+            Principal principal,
+            SimpMessageHeaderAccessor headerAccessor
+    ) {
+        try {
+            String playerId = extractPlayerId(message, principal);
+            String sessionId = headerAccessor != null ? headerAccessor.getSessionId() : null;
+            String normalizedPlayerId = playerId != null ? playerId.trim().toLowerCase() : null;
+            
+            log.info("📊 Game state request recibido: gameId={}, playerId={} (normalized: {})", 
+                gameId, normalizedPlayerId, normalizedPlayerId);
+            
+            // Verificar que el jugador pertenece al juego
+            if (!gameService.isPlayerInGame(gameId, normalizedPlayerId)) {
+                log.warn("Player {} attempted to request state for game {} but is not a participant", 
+                    normalizedPlayerId, gameId);
+                return;
+            }
+            
+            // ✅ CRÍTICO: Mantener sesión activa para WebRTC
+            if (sessionId != null && normalizedPlayerId != null) {
+                sessionService.registerSession(normalizedPlayerId, sessionId);
+            }
+            
+            // Obtener el estado del juego
+            GameState gameState = gameService.getGameState(gameId);
+            
+            // Crear mensaje de respuesta con el estado
+            GameMessage response = GameMessage.create(
+                MessageType.GAME_STATE_SYNC,
+                gameId,
+                normalizedPlayerId,
+                gameState
+            );
+            
+            // Enviar solo al jugador que lo solicitó
+            messagingTemplate.convertAndSendToUser(
+                normalizedPlayerId,
+                "/queue/game/" + gameId + "/state",
+                response
+            );
+            
+            log.info("✅ Game state enviado a player {} para game {}", normalizedPlayerId, gameId);
+            
+        } catch (Exception e) {
+            log.error("Error handling game state request: {}", e.getMessage(), e);
+        }
+    }
+    
     /**
      * Ping para keep-alive
      */
